@@ -143,6 +143,7 @@ export function resolveLiteLlmPricingForModelId(
   if (normalized.startsWith('openai/')) candidates.push(normalized.slice('openai/'.length))
   if (normalized.startsWith('google/')) candidates.push(normalized.slice('google/'.length))
   if (normalized.startsWith('anthropic/')) candidates.push(normalized.slice('anthropic/'.length))
+  if (normalized.startsWith('xai/')) candidates.push(normalized.slice('xai/'.length))
 
   for (const key of candidates) {
     const row = catalog[key]

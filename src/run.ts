@@ -338,8 +338,12 @@ function writeFinishLine({
   report: ReturnType<typeof buildRunCostReport>
   color: boolean
 }): void {
-  const fmtUsd = (value: number | null) =>
-    typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(2)}` : 'unknown'
+  const fmtUsd = (value: number | null) => {
+    if (!(typeof value === 'number' && Number.isFinite(value))) return 'unknown'
+    if (value === 0) return '$0.00'
+    if (value > 0 && value < 0.01) return '<$0.01'
+    return `$${value.toFixed(2)}`
+  }
   const promptTokens = sumNumbersOrNull(report.llm.map((row) => row.promptTokens))
   const completionTokens = sumNumbersOrNull(report.llm.map((row) => row.completionTokens))
   const totalTokens = sumNumbersOrNull(report.llm.map((row) => row.totalTokens))
@@ -349,19 +353,20 @@ function writeFinishLine({
       ? `tok(i/o/t)=${promptTokens?.toLocaleString() ?? 'unknown'}/${completionTokens?.toLocaleString() ?? 'unknown'}/${totalTokens?.toLocaleString() ?? 'unknown'}`
       : 'tok(i/o/t)=unknown'
 
-  const parts: string[] = [
-    model,
-    tokPart,
-    `firecrawl=${report.services.firecrawl.requests}`,
-    `apify=${report.services.apify.requests}`,
-    `cost=${fmtUsd(report.totalEstimatedUsd)}`,
-  ]
+  const parts: string[] = [model, tokPart, `cost=${fmtUsd(report.totalEstimatedUsd)}`]
 
-  if (strategy !== 'none') {
-    parts.push(`strategy=${strategy}`)
+  if (report.services.firecrawl.requests > 0) {
+    parts.push(`firecrawl=${report.services.firecrawl.requests}`)
   }
-  if (typeof chunkCount === 'number' && Number.isFinite(chunkCount)) {
-    parts.push(`chunks=${chunkCount}`)
+  if (report.services.apify.requests > 0) {
+    parts.push(`apify=${report.services.apify.requests}`)
+  }
+
+  if (strategy === 'map-reduce') {
+    parts.push('strategy=map-reduce')
+    if (typeof chunkCount === 'number' && Number.isFinite(chunkCount) && chunkCount > 0) {
+      parts.push(`chunks=${chunkCount}`)
+    }
   }
 
   const line = `Finished in ${formatElapsedMs(elapsedMs)} (${parts.join(' | ')})`

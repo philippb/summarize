@@ -36,6 +36,17 @@ describe('LiteLLM pricing catalog', () => {
       inputUsdPerToken: 0.0000002,
       outputUsdPerToken: 0.0000005,
     })
+
+    const catalogNoPrefix = {
+      'grok-4-fast-non-reasoning': {
+        input_cost_per_token: 0.00000021,
+        output_cost_per_token: 0.00000051,
+      },
+    }
+    expect(resolveLiteLlmPricingForModelId(catalogNoPrefix, 'xai/grok-4-fast-non-reasoning')).toEqual({
+      inputUsdPerToken: 0.00000021,
+      outputUsdPerToken: 0.00000051,
+    })
   })
 
   it('returns null when token costs are missing', () => {
