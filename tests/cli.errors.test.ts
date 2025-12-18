@@ -24,6 +24,17 @@ describe('cli error handling', () => {
     ).rejects.toThrow(/Usage: summarize/)
   })
 
+  it('errors when url is not http(s)', async () => {
+    await expect(
+      runCli(['ftp://example.com'], {
+        env: {},
+        fetch: vi.fn() as unknown as typeof fetch,
+        stdout: noopStream(),
+        stderr: noopStream(),
+      })
+    ).rejects.toThrow('Only HTTP and HTTPS URLs can be summarized')
+  })
+
   it('errors when --prompt and --extract-only are both set', async () => {
     await expect(
       runCli(['--prompt', '--extract-only', 'https://example.com'], {

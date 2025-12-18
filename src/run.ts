@@ -293,12 +293,26 @@ export async function runCli(
     throw error
   }
 
-  const url = program.args[0]
-  if (!url) {
+  const rawUrl = program.args[0]
+  if (!rawUrl) {
     throw new Error(
       'Usage: summarize <url> [--youtube auto|web|apify] [--length 20k] [--timeout 2m] [--json]'
     )
   }
+
+  const url = (() => {
+    const normalized = rawUrl.trim()
+    let parsed: URL
+    try {
+      parsed = new URL(normalized)
+    } catch {
+      throw new Error(`Invalid URL: ${rawUrl}`)
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Only HTTP and HTTPS URLs can be summarized')
+    }
+    return normalized
+  })()
 
   const youtubeMode = parseYoutubeMode(program.opts().youtube as string)
   const lengthArg = parseLengthArg(program.opts().length as string)
