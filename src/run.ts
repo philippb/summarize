@@ -688,7 +688,7 @@ export async function runCli(
   const spinner = startSpinner({
     text: 'Fetching website…',
     enabled: progressEnabled,
-    write: (data) => stderr.write(data),
+    stream: stderr,
   })
   const extracted = await (async () => {
     try {

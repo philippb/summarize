@@ -1,45 +1,34 @@
-const CLEAR_LINE = '\u001b[2K'
+import ora from 'ora'
 
 export function startSpinner({
   text,
   enabled,
-  write,
+  stream,
 }: {
   text: string
   enabled: boolean
-  write: (data: string) => void
+  stream: NodeJS.WritableStream
 }): { stop: () => void; setText: (next: string) => void } {
   if (!enabled) {
     return { stop: () => {}, setText: () => {} }
   }
 
-  const frames = ['|', '/', '-', '\\']
-  let index = 0
-  let currentText = text
-
-  const render = () => {
-    const frame = frames[index] ?? '|'
-    index = (index + 1) % frames.length
-    write(`\r${CLEAR_LINE}${frame} ${currentText}`)
-  }
-
-  render()
-  const timer = setInterval(render, 90)
-  timer.unref?.()
-
-  let stopped = false
   const stop = () => {
-    if (stopped) return
-    stopped = true
-    clearInterval(timer)
-    write(`\r${CLEAR_LINE}`)
+    if (spinner.isSpinning) spinner.stop()
   }
 
   const setText = (next: string) => {
-    currentText = next
-    render()
+    spinner.text = next
   }
+
+  const spinner = ora({
+    text,
+    stream,
+    // Match Sweetistics CLI vibe; keep it clean.
+    spinner: 'dots12',
+    color: 'cyan',
+    discardStdin: true,
+  }).start()
 
   return { stop, setText }
 }
-
