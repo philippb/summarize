@@ -19,11 +19,11 @@
   --max: 1080px;
 
   --mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 
-  --serif: "Fraunces", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-  --body: "Literata", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --body: var(--mono);
+  --serif: var(--mono);
 }
 
 @media (prefers-color-scheme: light) {
@@ -131,10 +131,8 @@ a:hover {
 
 .brand__word {
   font-family: var(--serif);
-  font-variation-settings:
-    "opsz" 36,
-    "wght" 650;
-  letter-spacing: -0.01em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   font-size: 18px;
 }
 
@@ -224,11 +222,9 @@ a:hover {
 .title {
   margin: 0;
   font-family: var(--serif);
-  font-size: clamp(34px, 4.7vw, 54px);
-  font-variation-settings:
-    "opsz" 48,
-    "wght" 740;
-  letter-spacing: -0.03em;
+  font-size: clamp(30px, 4.2vw, 46px);
+  font-weight: 700;
+  letter-spacing: -0.015em;
   line-height: 1.02;
 }
 
@@ -241,9 +237,7 @@ a:hover {
 
 .lede strong {
   color: var(--fg0);
-  font-variation-settings:
-    "opsz" 22,
-    "wght" 650;
+  font-weight: 600;
 }
 
 .pillRow {
@@ -421,10 +415,8 @@ code {
 .card h2 {
   margin: 0 0 8px;
   font-family: var(--serif);
-  font-variation-settings:
-    "opsz" 24,
-    "wght" 680;
-  letter-spacing: -0.02em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   font-size: 18px;
 }
 
@@ -551,20 +543,16 @@ code {
 .doc h1 {
   margin: 0 0 10px;
   font-family: var(--serif);
-  font-variation-settings:
-    "opsz" 30,
-    "wght" 740;
-  letter-spacing: -0.03em;
+  font-weight: 700;
+  letter-spacing: -0.015em;
   font-size: 30px;
 }
 
 .doc h2 {
   margin: 18px 0 8px;
   font-family: var(--serif);
-  font-variation-settings:
-    "opsz" 22,
-    "wght" 700;
-  letter-spacing: -0.02em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   font-size: 18px;
 }
 
