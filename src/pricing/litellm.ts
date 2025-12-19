@@ -160,6 +160,7 @@ export function resolveLiteLlmPricingForModelId(
       Number.isFinite(output) &&
       output >= 0
     ) {
+      if (input === 0 && output === 0) continue
       return { inputUsdPerToken: input, outputUsdPerToken: output }
     }
   }

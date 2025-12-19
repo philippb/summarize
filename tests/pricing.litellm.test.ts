@@ -62,6 +62,13 @@ describe('LiteLLM pricing catalog', () => {
     expect(resolveLiteLlmPricingForModelId(catalog, 'openai/gpt-5.2')).toBeNull()
   })
 
+  it('treats 0/0 costs as unknown (not free)', () => {
+    const catalog = {
+      'grok-4-fast-non-reasoning': { input_cost_per_token: 0, output_cost_per_token: 0 },
+    }
+    expect(resolveLiteLlmPricingForModelId(catalog, 'xai/grok-4-fast-non-reasoning')).toBeNull()
+  })
+
   it('resolves max output tokens for gateway-style ids', () => {
     const catalog = {
       'gpt-5.2': { max_output_tokens: 16384 },
