@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { Option } from 'commander'
 import type { ModelMessage } from 'ai'
 import { Command, CommanderError } from 'commander'
 import { createLiveRenderer, render as renderMarkdownAnsi } from 'markdansi'
@@ -40,6 +41,7 @@ import {
 } from './prompts/index.js'
 import { startOscProgress } from './tty/osc-progress.js'
 import { startSpinner } from './tty/spinner.js'
+import { resolvePackageVersion } from './version.js'
 
 type RunEnv = {
   env: Record<string, string | undefined>
@@ -87,6 +89,7 @@ type JsonOutput = {
     strategy: 'single' | 'map-reduce'
     chunkCount: number
   } | null
+  metrics: ReturnType<typeof buildRunCostReport> | null
   cost?: ReturnType<typeof buildRunCostReport> | null
   summary: string | null
 }
@@ -94,10 +97,11 @@ type JsonOutput = {
 const MAP_REDUCE_TRIGGER_CHARACTERS = 120_000
 const MAP_REDUCE_CHUNK_CHARACTERS = 60_000
 
-function buildProgram() {
+function buildProgram({ version }: { version: string }) {
   return new Command()
     .name('summarize')
     .description('Summarize web pages and YouTube links (uses direct provider API keys).')
+    .version(version, '--version', 'Print version')
     .argument('[input]', 'URL or local file path to summarize')
     .option(
       '--youtube <mode>',
@@ -147,7 +151,9 @@ function buildProgram() {
       'auto'
     )
     .option('--verbose', 'Print detailed progress info to stderr', false)
-    .option('--cost', 'Print token usage and estimated costs to stderr', false)
+    .option('--no-metrics', 'Disable final metrics line and omit metrics from --json output')
+    .option('--cost-details', 'Print detailed token + cost breakdown to stderr', false)
+    .addOption(new Option('--cost').hideHelp())
     .allowExcessArguments(false)
 }
 
@@ -245,7 +251,11 @@ function assertProviderSupportsAttachment({
   attachment: { part: { type: string }; mediaType: string }
 }) {
   // xAI via AI SDK currently supports image parts, but not generic file parts (e.g. PDFs).
-  if (provider === 'xai' && attachment.part.type === 'file') {
+  if (
+    provider === 'xai' &&
+    attachment.part.type === 'file' &&
+    !isTextLikeMediaType(attachment.mediaType)
+  ) {
     throw new Error(
       `Model ${modelId} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`
     )
@@ -554,7 +564,7 @@ export async function runCli(
   ;(globalThis as unknown as { AI_SDK_LOG_WARNINGS?: boolean }).AI_SDK_LOG_WARNINGS = false
 
   const normalizedArgv = argv.filter((arg) => arg !== '--')
-  const program = buildProgram()
+  const program = buildProgram({ version: resolvePackageVersion(import.meta.url) })
   program.configureOutput({
     writeOut(str) {
       stdout.write(str)
@@ -570,6 +580,9 @@ export async function runCli(
     program.parse(normalizedArgv, { from: 'user' })
   } catch (error) {
     if (error instanceof CommanderError && error.code === 'commander.helpDisplayed') {
+      return
+    }
+    if (error instanceof CommanderError && error.code === 'commander.version') {
       return
     }
     throw error
@@ -595,7 +608,8 @@ export async function runCli(
   const streamMode = parseStreamMode(program.opts().stream as string)
   const renderMode = parseRenderMode(program.opts().render as string)
   const verbose = Boolean(program.opts().verbose)
-  const cost = Boolean(program.opts().cost)
+  const metricsEnabled = Boolean(program.opts().metrics)
+  const costDetails = Boolean(program.opts().costDetails) || Boolean(program.opts().cost)
   const markdownMode = parseMarkdownMode(program.opts().markdown as string)
   const raw = Boolean(program.opts().raw)
 
@@ -839,6 +853,7 @@ export async function runCli(
 
     let summaryAlreadyPrinted = false
     let summary = ''
+    let getLastStreamError: (() => unknown) | null = null
 
     if (streamingEnabledForCall) {
       let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
@@ -890,6 +905,7 @@ export async function runCli(
       }
 
       if (streamResult) {
+        getLastStreamError = streamResult.lastError
         let streamed = ''
         const liveRenderer = shouldLiveRenderSummary
           ? createLiveRenderer({
@@ -998,6 +1014,10 @@ export async function runCli(
 
     summary = summary.trim()
     if (summary.length === 0) {
+      const last = getLastStreamError?.()
+      if (last instanceof Error) {
+        throw new Error(last.message, { cause: last })
+      }
       throw new Error('LLM returned an empty summary')
     }
 
@@ -1010,8 +1030,8 @@ export async function runCli(
 
     if (json) {
       clearProgressForStdout()
-      const finishReport = await buildReport()
-      const costReport = cost || verbose ? finishReport : null
+      const finishReport = metricsEnabled || costDetails || verbose ? await buildReport() : null
+      const costReport = costDetails || verbose ? finishReport : null
       const input: JsonOutput['input'] =
         sourceKind === 'file'
           ? {
@@ -1053,23 +1073,26 @@ export async function runCli(
           strategy: 'single',
           chunkCount: 1,
         },
-        cost: costReport,
+        metrics: metricsEnabled ? finishReport : null,
+        cost: metricsEnabled ? costReport : null,
         summary,
       }
 
-      if (costReport) {
+      if (metricsEnabled && costReport) {
         writeCostReport(costReport)
       }
       stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-      writeFinishLine({
-        stderr,
-        elapsedMs: Date.now() - runStartedAtMs,
-        model: parsedModelEffective.canonical,
-        strategy: 'single',
-        chunkCount: 1,
-        report: finishReport,
-        color: verboseColor,
-      })
+      if (metricsEnabled && finishReport) {
+        writeFinishLine({
+          stderr,
+          elapsedMs: Date.now() - runStartedAtMs,
+          model: parsedModelEffective.canonical,
+          strategy: 'single',
+          chunkCount: 1,
+          report: finishReport,
+          color: verboseColor,
+        })
+      }
       return
     }
 
@@ -1090,17 +1113,19 @@ export async function runCli(
       }
     }
 
-    const report = await buildReport()
-    if (cost || verbose) writeCostReport(report)
-    writeFinishLine({
-      stderr,
-      elapsedMs: Date.now() - runStartedAtMs,
-      model: parsedModelEffective.canonical,
-      strategy: 'single',
-      chunkCount: 1,
-      report,
-      color: verboseColor,
-    })
+    const report = metricsEnabled || costDetails || verbose ? await buildReport() : null
+    if (metricsEnabled && report && (costDetails || verbose)) writeCostReport(report)
+    if (metricsEnabled && report) {
+      writeFinishLine({
+        stderr,
+        elapsedMs: Date.now() - runStartedAtMs,
+        model: parsedModelEffective.canonical,
+        strategy: 'single',
+        chunkCount: 1,
+        report,
+        color: verboseColor,
+      })
+    }
   }
 
   if (inputTarget.kind === 'file') {
@@ -1404,8 +1429,8 @@ export async function runCli(
     if (extractOnly) {
       clearProgressForStdout()
       if (json) {
-        const finishReport = await buildReport()
-        const costReport = cost || verbose ? finishReport : null
+        const finishReport = metricsEnabled || costDetails || verbose ? await buildReport() : null
+        const costReport = costDetails || verbose ? finishReport : null
         const payload: JsonOutput = {
           input: {
             kind: 'url',
@@ -1431,37 +1456,42 @@ export async function runCli(
           extracted,
           prompt,
           llm: null,
-          cost: costReport,
+          metrics: metricsEnabled ? finishReport : null,
+          cost: metricsEnabled ? costReport : null,
           summary: null,
         }
-        if (costReport) {
+        if (metricsEnabled && costReport) {
           writeCostReport(costReport)
         }
         stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+        if (metricsEnabled && finishReport) {
+          writeFinishLine({
+            stderr,
+            elapsedMs: Date.now() - runStartedAtMs,
+            model,
+            strategy: 'none',
+            chunkCount: null,
+            report: finishReport,
+            color: verboseColor,
+          })
+        }
+        return
+      }
+
+      stdout.write(`${extracted.content}\n`)
+      const report = metricsEnabled || costDetails || verbose ? await buildReport() : null
+      if (metricsEnabled && report && (costDetails || verbose)) writeCostReport(report)
+      if (metricsEnabled && report) {
         writeFinishLine({
           stderr,
           elapsedMs: Date.now() - runStartedAtMs,
           model,
           strategy: 'none',
           chunkCount: null,
-          report: finishReport,
+          report,
           color: verboseColor,
         })
-        return
       }
-
-      stdout.write(`${extracted.content}\n`)
-      const report = await buildReport()
-      if (cost || verbose) writeCostReport(report)
-      writeFinishLine({
-        stderr,
-        elapsedMs: Date.now() - runStartedAtMs,
-        model,
-        strategy: 'none',
-        chunkCount: null,
-        report,
-        color: verboseColor,
-      })
       return
     }
 
@@ -1534,6 +1564,7 @@ export async function runCli(
     let summaryAlreadyPrinted = false
 
     let summary = ''
+    let getLastStreamError: (() => unknown) | null = null
     if (!isLargeContent) {
       writeVerbose(stderr, verbose, 'summarize strategy=single', verboseColor)
       if (streamingEnabledForCall) {
@@ -1587,6 +1618,7 @@ export async function runCli(
         }
 
         if (streamResult) {
+          getLastStreamError = streamResult.lastError
           let streamed = ''
           const liveRenderer = shouldLiveRenderSummary
             ? createLiveRenderer({
@@ -1793,6 +1825,7 @@ export async function runCli(
         }
 
         if (streamResult) {
+          getLastStreamError = streamResult.lastError
           let streamed = ''
           const liveRenderer = shouldLiveRenderSummary
             ? createLiveRenderer({
@@ -1879,12 +1912,16 @@ export async function runCli(
 
     summary = summary.trim()
     if (summary.length === 0) {
+      const last = getLastStreamError?.()
+      if (last instanceof Error) {
+        throw new Error(last.message, { cause: last })
+      }
       throw new Error('LLM returned an empty summary')
     }
 
     if (json) {
-      const finishReport = await buildReport()
-      const costReport = cost || verbose ? finishReport : null
+      const finishReport = metricsEnabled || costDetails || verbose ? await buildReport() : null
+      const costReport = costDetails || verbose ? finishReport : null
       const payload: JsonOutput = {
         input: {
           kind: 'url',
@@ -1916,23 +1953,26 @@ export async function runCli(
           strategy,
           chunkCount,
         },
-        cost: costReport,
+        metrics: metricsEnabled ? finishReport : null,
+        cost: metricsEnabled ? costReport : null,
         summary,
       }
 
-      if (costReport) {
+      if (metricsEnabled && costReport) {
         writeCostReport(costReport)
       }
       stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-      writeFinishLine({
-        stderr,
-        elapsedMs: Date.now() - runStartedAtMs,
-        model: parsedModelEffective.canonical,
-        strategy,
-        chunkCount,
-        report: finishReport,
-        color: verboseColor,
-      })
+      if (metricsEnabled && finishReport) {
+        writeFinishLine({
+          stderr,
+          elapsedMs: Date.now() - runStartedAtMs,
+          model: parsedModelEffective.canonical,
+          strategy,
+          chunkCount,
+          report: finishReport,
+          color: verboseColor,
+        })
+      }
       return
     }
 
@@ -1953,17 +1993,19 @@ export async function runCli(
       }
     }
 
-    const report = await buildReport()
-    if (cost || verbose) writeCostReport(report)
-    writeFinishLine({
-      stderr,
-      elapsedMs: Date.now() - runStartedAtMs,
-      model: parsedModelEffective.canonical,
-      strategy,
-      chunkCount,
-      report,
-      color: verboseColor,
-    })
+    const report = metricsEnabled || costDetails || verbose ? await buildReport() : null
+    if (metricsEnabled && report && (costDetails || verbose)) writeCostReport(report)
+    if (metricsEnabled && report) {
+      writeFinishLine({
+        stderr,
+        elapsedMs: Date.now() - runStartedAtMs,
+        model: parsedModelEffective.canonical,
+        strategy,
+        chunkCount,
+        report,
+        color: verboseColor,
+      })
+    }
   } finally {
     if (clearProgressBeforeStdout === stopProgress) {
       clearProgressBeforeStdout = null

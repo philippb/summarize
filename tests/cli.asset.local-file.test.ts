@@ -48,6 +48,14 @@ vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: createOpenAIMock,
 }))
 
+const createXaiMock = vi.fn(() => {
+  return (_modelId: string) => ({})
+})
+
+vi.mock('@ai-sdk/xai', () => ({
+  createXai: createXaiMock,
+}))
+
 describe('cli asset inputs (local file)', () => {
   it('attaches a local PDF to the model with a detected media type', async () => {
     streamTextMock.mockClear()
@@ -174,6 +182,72 @@ describe('cli asset inputs (local file)', () => {
     const call = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
     expect(typeof call.prompt).toBe('string')
     expect(String(call.prompt)).toContain('Hello from text file.')
+    expect(call.messages).toBeUndefined()
+
+    globalFetchSpy.mockRestore()
+  })
+
+  it('allows xAI models to summarize local text files (inlined prompt)', async () => {
+    streamTextMock.mockClear()
+
+    const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-txt-xai-'))
+    const cacheDir = join(root, '.summarize', 'cache')
+    mkdirSync(cacheDir, { recursive: true })
+
+    writeFileSync(
+      join(cacheDir, 'litellm-model_prices_and_context_window.json'),
+      JSON.stringify({
+        'grok-4-fast-non-reasoning': {
+          input_cost_per_token: 0.0000002,
+          output_cost_per_token: 0.0000008,
+        },
+      }),
+      'utf8'
+    )
+    writeFileSync(
+      join(cacheDir, 'litellm-model_prices_and_context_window.meta.json'),
+      JSON.stringify({ fetchedAtMs: Date.now() }),
+      'utf8'
+    )
+
+    const globalFetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('unexpected LiteLLM catalog fetch')
+    })
+
+    const txtPath = join(root, 'test.txt')
+    writeFileSync(txtPath, 'Hello from xAI text file.\nSecond line.\n', 'utf8')
+
+    const stdout = collectStream()
+    const stderr = collectStream()
+
+    await runCli(
+      [
+        '--model',
+        'xai/grok-4-fast-non-reasoning',
+        '--timeout',
+        '2s',
+        '--stream',
+        'on',
+        '--render',
+        'plain',
+        txtPath,
+      ],
+      {
+        env: { HOME: root, XAI_API_KEY: 'test' },
+        fetch: vi.fn(async () => {
+          throw new Error('unexpected fetch')
+        }) as unknown as typeof fetch,
+        stdout: stdout.stream,
+        stderr: stderr.stream,
+      }
+    )
+
+    expect(stdout.getText()).toContain('OK')
+    expect(streamTextMock).toHaveBeenCalledTimes(1)
+
+    const call = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
+    expect(typeof call.prompt).toBe('string')
+    expect(String(call.prompt)).toContain('Hello from xAI text file.')
     expect(call.messages).toBeUndefined()
 
     globalFetchSpy.mockRestore()

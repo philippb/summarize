@@ -187,6 +187,7 @@ export async function streamTextWithModelId({
   canonicalModelId: string
   provider: 'xai' | 'openai' | 'google' | 'anthropic'
   usage: Promise<LlmTokenUsage | null>
+  lastError: () => unknown
 }> {
   const parsed = parseGatewayStyleModelId(modelId)
 
@@ -195,6 +196,10 @@ export async function streamTextWithModelId({
 
   try {
     const { streamText } = await import('ai')
+    let lastError: unknown = null
+    const onError = ({ error }: { error: unknown }) => {
+      lastError = error
+    }
 
     if (parsed.provider === 'xai') {
       const apiKey = apiKeys.xaiApiKey
@@ -208,12 +213,14 @@ export async function streamTextWithModelId({
         temperature,
         ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
         abortSignal: controller.signal,
+        onError,
       })
       return {
         textStream: result.textStream,
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)),
+        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
+        lastError: () => lastError,
       }
     }
 
@@ -229,12 +236,14 @@ export async function streamTextWithModelId({
         temperature,
         ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
         abortSignal: controller.signal,
+        onError,
       })
       return {
         textStream: result.textStream,
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)),
+        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
+        lastError: () => lastError,
       }
     }
 
@@ -250,12 +259,14 @@ export async function streamTextWithModelId({
         temperature,
         ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
         abortSignal: controller.signal,
+        onError,
       })
       return {
         textStream: result.textStream,
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)),
+        usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
+        lastError: () => lastError,
       }
     }
 
@@ -270,12 +281,14 @@ export async function streamTextWithModelId({
       temperature,
       ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
       abortSignal: controller.signal,
+      onError,
     })
     return {
       textStream: result.textStream,
       canonicalModelId: parsed.canonical,
       provider: parsed.provider,
-      usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)),
+      usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
+      lastError: () => lastError,
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
