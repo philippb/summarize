@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -206,5 +209,52 @@ describe('cli main wiring', async () => {
 
     expect(exitCode).toBe(1)
     expect(stderrText.trim()).toBe('Unknown error')
+  })
+
+  it('loads .env for cli runs without mutating process.env', async () => {
+    runCliMock.mockReset().mockResolvedValue(undefined)
+
+    const directory = mkdtempSync(join(tmpdir(), 'summarize-dotenv-'))
+    writeFileSync(
+      join(directory, '.env'),
+      ['SUMMARIZE_DOTENV_TEST_KEY=from-dotenv', 'DOTENV_ONLY=only', ''].join('\n'),
+      'utf8'
+    )
+
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(directory)
+
+    const previous = process.env.SUMMARIZE_DOTENV_TEST_KEY
+    process.env.SUMMARIZE_DOTENV_TEST_KEY = 'from-env'
+    delete process.env.DOTENV_ONLY
+
+    try {
+      await runCliMain({
+        argv: [],
+        env: process.env,
+        fetch: globalThis.fetch.bind(globalThis),
+        stdout: new Writable({
+          write(_c, _e, cb) {
+            cb()
+          },
+        }),
+        stderr: new Writable({
+          write(_c, _e, cb) {
+            cb()
+          },
+        }),
+        exit: () => {},
+        setExitCode: () => {},
+      })
+
+      expect(runCliMock).toHaveBeenCalledTimes(1)
+      const merged = runCliMock.mock.calls[0]?.[1]?.env as Record<string, string | undefined>
+      expect(merged.SUMMARIZE_DOTENV_TEST_KEY).toBe('from-env')
+      expect(merged.DOTENV_ONLY).toBe('only')
+      expect(process.env.DOTENV_ONLY).toBeUndefined()
+    } finally {
+      cwdSpy.mockRestore()
+      if (typeof previous === 'string') process.env.SUMMARIZE_DOTENV_TEST_KEY = previous
+      else delete process.env.SUMMARIZE_DOTENV_TEST_KEY
+    }
   })
 })

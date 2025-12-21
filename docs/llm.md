@@ -9,6 +9,7 @@ By default `summarize` will call an LLM using **direct provider API keys**.
 
 ## Env
 
+- `.env` (optional): when running the CLI, `summarize` also reads `.env` in the current working directory and merges it into the environment (real env vars win).
 - `XAI_API_KEY` (required for `xai/...` models)
 - `OPENAI_API_KEY` (required for `openai/...` models)
 - `OPENAI_BASE_URL` (optional; OpenAI-compatible API endpoint, e.g. OpenRouter)
