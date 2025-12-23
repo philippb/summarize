@@ -7,6 +7,14 @@ import JSON5 from 'json5'
 import type { LlmApiKeys } from './llm/generate-text.js'
 import { generateTextWithModelId } from './llm/generate-text.js'
 
+type GenerateFreeOptions = {
+  runs: number
+  smart: number
+  maxCandidates: number
+  concurrency: number
+  timeoutMs: number
+}
+
 function assertNoComments(raw: string, path: string): void {
   let inString: '"' | "'" | null = null
   let escaped = false
@@ -78,6 +86,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+type OpenRouterModelEntry = {
+  id: string
+  contextLength: number | null
+  maxCompletionTokens: number | null
+  supportedParametersCount: number
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -106,12 +121,14 @@ export async function generateFree({
   stdout,
   stderr,
   verbose = false,
+  options = {},
 }: {
   env: Record<string, string | undefined>
   fetchImpl: typeof fetch
   stdout: NodeJS.WritableStream
   stderr: NodeJS.WritableStream
   verbose?: boolean
+  options?: Partial<GenerateFreeOptions>
 }): Promise<void> {
   const openrouterKey =
     typeof env.OPENROUTER_API_KEY === 'string' && env.OPENROUTER_API_KEY.trim().length > 0
@@ -121,10 +138,20 @@ export async function generateFree({
     throw new Error('Missing OPENROUTER_API_KEY (required for generate-free)')
   }
 
-  const CONCURRENCY = 4
-  const TIMEOUT_MS = 10_000
-  const MAX_CANDIDATES = 8
-  const TARGET_WORKING = MAX_CANDIDATES * 3
+  const resolved: GenerateFreeOptions = {
+    runs: 3,
+    smart: 3,
+    maxCandidates: 8,
+    concurrency: 4,
+    timeoutMs: 10_000,
+    ...options,
+  }
+  const RUNS = Math.max(1, Math.floor(resolved.runs))
+  const SMART = Math.max(0, Math.floor(resolved.smart))
+  const MAX_CANDIDATES = Math.max(1, Math.floor(resolved.maxCandidates))
+  const CONCURRENCY = Math.max(1, Math.floor(resolved.concurrency))
+  const TIMEOUT_MS = Math.max(1, Math.floor(resolved.timeoutMs))
+  const TARGET_WORKING = Math.max(MAX_CANDIDATES, MAX_CANDIDATES * 3)
 
   stderr.write(`OpenRouter: fetching models…\n`)
   const response = await fetchImpl('https://openrouter.ai/api/v1/models', {
@@ -133,17 +160,71 @@ export async function generateFree({
   if (!response.ok) {
     throw new Error(`OpenRouter /models failed: HTTP ${response.status}`)
   }
-  const payload = (await response.json()) as { data?: Array<{ id?: unknown } | null> }
-  const ids = (Array.isArray(payload.data) ? payload.data : [])
-    .map((entry) => (entry && typeof entry.id === 'string' ? entry.id.trim() : null))
-    .filter((id): id is string => Boolean(id))
+  const payload = (await response.json()) as { data?: unknown }
+  const entries = (Array.isArray(payload.data) ? payload.data : []) as unknown[]
 
-  const freeIds = ids.filter((id) => id.endsWith(':free'))
-  if (freeIds.length === 0) {
+  const catalogModels: OpenRouterModelEntry[] = entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const obj = entry as Record<string, unknown>
+      const id = typeof obj.id === 'string' ? obj.id.trim() : ''
+      if (!id) return null
+
+      const contextLength =
+        typeof obj.context_length === 'number' && Number.isFinite(obj.context_length)
+          ? obj.context_length
+          : null
+
+      const topProvider =
+        obj.top_provider && typeof obj.top_provider === 'object'
+          ? (obj.top_provider as Record<string, unknown>)
+          : null
+      const maxCompletionTokens =
+        typeof topProvider?.max_completion_tokens === 'number' &&
+        Number.isFinite(topProvider.max_completion_tokens)
+          ? (topProvider.max_completion_tokens as number)
+          : null
+
+      const supportedParametersCount = (() => {
+        const sp = obj.supported_parameters
+        if (!Array.isArray(sp)) return 0
+        return sp.filter((v) => typeof v === 'string' && v.trim().length > 0).length
+      })()
+
+      return {
+        id,
+        contextLength,
+        maxCompletionTokens,
+        supportedParametersCount,
+      } satisfies OpenRouterModelEntry
+    })
+    .filter((v): v is OpenRouterModelEntry => Boolean(v))
+
+  const freeModels = catalogModels.filter((m) => m.id.endsWith(':free'))
+  if (freeModels.length === 0) {
     throw new Error('OpenRouter /models returned no :free models')
   }
 
-  stderr.write(`OpenRouter: found ${freeIds.length} :free models; testing…\n`)
+  const smartSorted = freeModels
+    .slice()
+    .sort((a, b) => {
+      const aContext = a.contextLength ?? -1
+      const bContext = b.contextLength ?? -1
+      if (aContext !== bContext) return bContext - aContext
+      const aOut = a.maxCompletionTokens ?? -1
+      const bOut = b.maxCompletionTokens ?? -1
+      if (aOut !== bOut) return bOut - aOut
+      if (a.supportedParametersCount !== b.supportedParametersCount) {
+        return b.supportedParametersCount - a.supportedParametersCount
+      }
+      return a.id.localeCompare(b.id)
+    })
+
+  const freeIds = smartSorted.map((m) => m.id)
+
+  stderr.write(
+    `OpenRouter: found ${freeIds.length} :free models; testing (runs=${RUNS}, concurrency=${CONCURRENCY}, timeout=${Math.round(TIMEOUT_MS / 100) / 10}s)…\n`
+  )
 
   const apiKeys: LlmApiKeys = {
     xaiApiKey: null,
@@ -153,14 +234,44 @@ export async function generateFree({
     openrouterApiKey: openrouterKey,
   }
 
-  type Ok = { openrouterModelId: string; latencyMs: number }
+  type Ok = {
+    openrouterModelId: string
+    medianLatencyMs: number
+    successCount: number
+    contextLength: number | null
+    maxCompletionTokens: number | null
+    supportedParametersCount: number
+  }
   type Result = { ok: true; value: Ok } | { ok: false; openrouterModelId: string; error: string }
 
+  const isTty = Boolean((stderr as unknown as { isTTY?: boolean }).isTTY)
+  let done = 0
+  let okCount = 0
+  const startedAt = Date.now()
+  let lastProgressPrint = 0
+
+  const progress = (label: string) => {
+    const now = Date.now()
+    const everyMs = isTty ? 150 : 1500
+    if (now - lastProgressPrint < everyMs) return
+    lastProgressPrint = now
+    const elapsedSec = Math.round((now - startedAt) / 100) / 10
+    const line = `OpenRouter: ${label} ${done}/${freeIds.length}, ok=${okCount} (elapsed ${elapsedSec}s)…`
+    if (isTty) {
+      stderr.write(`\x1b[2K\r${line}`)
+    } else {
+      stderr.write(`${line}\n`)
+    }
+  }
+
   const results: Result[] = []
+  const idToMeta = new Map(smartSorted.map((m) => [m.id, m] as const))
+
+  // Pass 1: single run per model (avoid OpenRouter free rate limits)
   for (let i = 0; i < freeIds.length; i += TARGET_WORKING * 5) {
     const batch = freeIds.slice(i, i + TARGET_WORKING * 5)
     const batchResults = await mapWithConcurrency(batch, CONCURRENCY, async (openrouterModelId) => {
-      const startedAt = Date.now()
+      const runStartedAt = Date.now()
       try {
         await generateTextWithModelId({
           modelId: `openai/${openrouterModelId}`,
@@ -173,32 +284,145 @@ export async function generateFree({
           forceOpenRouter: true,
           retries: 0,
         })
+
+        done += 1
+        okCount += 1
+        progress('tested')
+
+        const meta = idToMeta.get(openrouterModelId) ?? null
         return {
           ok: true,
-          value: { openrouterModelId, latencyMs: Date.now() - startedAt },
+          value: {
+            openrouterModelId,
+            medianLatencyMs: Date.now() - runStartedAt,
+            successCount: 1,
+            contextLength: meta?.contextLength ?? null,
+            maxCompletionTokens: meta?.maxCompletionTokens ?? null,
+            supportedParametersCount: meta?.supportedParametersCount ?? 0,
+          },
         } satisfies Result
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        if (verbose) stderr.write(`fail ${openrouterModelId}: ${message}\n`)
+        done += 1
+        progress('tested')
+        if (verbose) stderr.write(`${isTty ? '\n' : ''}fail ${openrouterModelId}: ${message}\n`)
         return { ok: false, openrouterModelId, error: message } satisfies Result
       }
     })
 
     for (const r of batchResults) results.push(r)
-    const okCount = results.reduce((n, r) => n + (r.ok ? 1 : 0), 0)
-    if (okCount >= TARGET_WORKING) break
+    const okCountSoFar = results.reduce((n, r) => n + (r.ok ? 1 : 0), 0)
+    if (okCountSoFar >= TARGET_WORKING) break
   }
+
+  if (isTty) stderr.write('\n')
 
   const ok = results
     .filter((r): r is Extract<Result, { ok: true }> => r.ok)
     .map((r) => r.value)
-    .sort((a, b) => a.latencyMs - b.latencyMs)
+    .sort((a, b) => a.medianLatencyMs - b.medianLatencyMs)
 
   if (ok.length === 0) {
     throw new Error(`No working :free models found (tested ${results.length})`)
   }
 
-  const selected = ok.slice(0, MAX_CANDIDATES).map((r) => `openrouter/${r.openrouterModelId}`)
+  const buildSelection = (working: Ok[]) => {
+    const smartFirst = working
+      .slice()
+      .sort((a, b) => {
+        const aContext = a.contextLength ?? -1
+        const bContext = b.contextLength ?? -1
+        if (aContext !== bContext) return bContext - aContext
+        const aOut = a.maxCompletionTokens ?? -1
+        const bOut = b.maxCompletionTokens ?? -1
+        if (aOut !== bOut) return bOut - aOut
+        if (a.supportedParametersCount !== b.supportedParametersCount) {
+          return b.supportedParametersCount - a.supportedParametersCount
+        }
+        if (a.successCount !== b.successCount) return b.successCount - a.successCount
+        if (a.medianLatencyMs !== b.medianLatencyMs) return a.medianLatencyMs - b.medianLatencyMs
+        return a.openrouterModelId.localeCompare(b.openrouterModelId)
+      })
+
+    const fastFirst = working
+      .slice()
+      .sort((a, b) => {
+        if (a.successCount !== b.successCount) return b.successCount - a.successCount
+        if (a.medianLatencyMs !== b.medianLatencyMs) return a.medianLatencyMs - b.medianLatencyMs
+        return a.openrouterModelId.localeCompare(b.openrouterModelId)
+      })
+
+    const picked = new Set<string>()
+    const ordered: string[] = []
+
+    for (const m of smartFirst) {
+      if (ordered.length >= Math.min(SMART, MAX_CANDIDATES)) break
+      if (picked.has(m.openrouterModelId)) continue
+      picked.add(m.openrouterModelId)
+      ordered.push(m.openrouterModelId)
+    }
+    for (const m of fastFirst) {
+      if (ordered.length >= MAX_CANDIDATES) break
+      if (picked.has(m.openrouterModelId)) continue
+      picked.add(m.openrouterModelId)
+      ordered.push(m.openrouterModelId)
+    }
+
+    return ordered
+  }
+
+  const selectedIdsInitial = buildSelection(ok)
+
+  // Pass 2: refine timing for selected candidates only (RUNS total)
+  const refined = ok.slice()
+  if (RUNS > 1 && selectedIdsInitial.length > 0) {
+    stderr.write(`OpenRouter: refining ${selectedIdsInitial.length} candidates (runs=${RUNS})…\n`)
+    const byId = new Map(refined.map((m) => [m.openrouterModelId, m] as const))
+    for (const openrouterModelId of selectedIdsInitial) {
+      const entry = byId.get(openrouterModelId)
+      if (!entry) continue
+      const latencies = [entry.medianLatencyMs]
+      let successCountForModel = entry.successCount
+      let lastError: unknown = null
+
+      for (let run = 1; run < RUNS; run += 1) {
+        const runStartedAt = Date.now()
+        try {
+          await generateTextWithModelId({
+            modelId: `openai/${openrouterModelId}`,
+            apiKeys,
+            prompt: 'Reply with a single word: OK',
+            temperature: 0,
+            maxOutputTokens: 16,
+            timeoutMs: TIMEOUT_MS,
+            fetchImpl,
+            forceOpenRouter: true,
+            retries: 0,
+          })
+          successCountForModel += 1
+          latencies.push(Date.now() - runStartedAt)
+        } catch (error) {
+          lastError = error
+        }
+      }
+
+      if (successCountForModel === 0 && lastError) {
+        if (verbose) stderr.write(`fail refine ${openrouterModelId}: ${String(lastError)}\n`)
+        continue
+      }
+
+      latencies.sort((a, b) => a - b)
+      entry.medianLatencyMs = latencies[Math.floor(latencies.length / 2)] ?? entry.medianLatencyMs
+      entry.successCount = successCountForModel
+    }
+  }
+
+  const selectedIds = buildSelection(refined)
+
+  const selected =
+    selectedIds.length > 0
+      ? selectedIds.map((id) => `openrouter/${id}`)
+      : refined.slice(0, MAX_CANDIDATES).map((r) => `openrouter/${r.openrouterModelId}`)
   stderr.write(`OpenRouter: selected ${selected.length} candidates.\n`)
 
   const configPath = resolveConfigPath(env)
@@ -216,17 +440,17 @@ export async function generateFree({
     if (code !== 'ENOENT') throw error
   }
 
-  const modelsRaw = root.models
-  const models = (() => {
-    if (typeof modelsRaw === 'undefined') return {}
-    if (!isRecord(modelsRaw)) {
+  const configModelsRaw = root.models
+  const configModels = (() => {
+    if (typeof configModelsRaw === 'undefined') return {}
+    if (!isRecord(configModelsRaw)) {
       throw new Error(`Invalid config file ${configPath}: "models" must be an object.`)
     }
-    return { ...modelsRaw }
+    return { ...configModelsRaw }
   })()
 
-  models.free = { rules: [{ candidates: selected }] }
-  root.models = models
+  configModels.free = { rules: [{ candidates: selected }] }
+  root.models = configModels
 
   await mkdir(dirname(configPath), { recursive: true })
   const next = `${JSON.stringify(root, null, 2)}\n`

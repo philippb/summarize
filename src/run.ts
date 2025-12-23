@@ -1160,7 +1160,48 @@ export async function runCli(
   const normalizedArgv = argv.filter((arg) => arg !== '--')
   if (normalizedArgv[0]?.toLowerCase() === 'generate-free') {
     const verbose = normalizedArgv.includes('--verbose') || normalizedArgv.includes('--debug')
-    await generateFree({ env, fetchImpl: fetch, stdout, stderr, verbose })
+    const help =
+      normalizedArgv.includes('--help') ||
+      normalizedArgv.includes('-h') ||
+      normalizedArgv.includes('help')
+
+    const readArgValue = (name: string): string | null => {
+      const eq = normalizedArgv.find((a) => a.startsWith(`${name}=`))
+      if (eq) return eq.slice(`${name}=`.length).trim() || null
+      const index = normalizedArgv.findIndex((a) => a === name)
+      if (index === -1) return null
+      const next = normalizedArgv[index + 1]
+      if (!next || next.startsWith('-')) return null
+      return next.trim() || null
+    }
+
+    const runsRaw = readArgValue('--runs')
+    const smartRaw = readArgValue('--smart')
+    const runs = runsRaw ? Number(runsRaw) : 3
+    const smart = smartRaw ? Number(smartRaw) : 3
+
+    if (help) {
+      stdout.write(
+        [
+          'Usage: summarizer generate-free [--runs 3] [--smart 3] [--verbose]',
+          '',
+          'Writes ~/.summarize/config.json (models.free) with working OpenRouter :free candidates.',
+        ].join('\n') + '\n'
+      )
+      return
+    }
+
+    if (!Number.isFinite(runs) || runs <= 0) throw new Error('--runs must be a positive number')
+    if (!Number.isFinite(smart) || smart < 0) throw new Error('--smart must be >= 0')
+
+    await generateFree({
+      env,
+      fetchImpl: fetch,
+      stdout,
+      stderr,
+      verbose,
+      options: { runs, smart, maxCandidates: 8, concurrency: 4, timeoutMs: 10_000 },
+    })
     return
   }
   const execFileImpl = execFileOverride ?? execFile
