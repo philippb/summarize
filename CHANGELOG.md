@@ -14,6 +14,7 @@
 - Named model presets via config (`~/.summarize/config.json` → `models`), selectable as `--model <preset>`.
 - Built-in preset: `--model free` (OpenRouter `:free` candidates; override via `models.free`).
 - `summarize refresh-free` regenerates `models.free` by scanning OpenRouter `:free` models and testing availability + latency.
+- `summarize refresh-free --set-default` also sets `"model": "free"` in `~/.summarize/config.json` (so free becomes your default).
 - Website extraction detects video-only pages:
   - YouTube embeds switch to transcript extraction automatically.
   - Direct video URLs can be downloaded + summarized when `--video-mode auto|understand` and a Gemini key is available.
@@ -28,6 +29,8 @@
 - `--model free`: when OpenRouter rejects routing with “No allowed providers”, print the exact provider names to allow and suggest running `summarize refresh-free`.
 - `--max-output-tokens`: when explicitly set, it is also forwarded to OpenRouter calls.
 - `summarize refresh-free`: default extra runs reduced to 2 (total runs = 1 + runs) to reduce rate-limit pressure.
+- `summarize refresh-free`: filter `:free` candidates by recency (default: last 180 days; configurable via `--max-age-days`).
+- `summarize refresh-free`: print `ctx`/`out` in `k` units for readability.
 
 ### Fixes
 
@@ -42,6 +45,7 @@
 ### Docs
 
 - Add documentation for presets and Refresh Free.
+- Add a “make free the default” quick start for `summarize refresh-free --set-default`.
 - Add a manual end-to-end checklist (`docs/manual-tests.md`).
 - Add a quick CLI smoke checklist (`docs/smoketest.md`).
 - Document CLI ordering and model selection behavior.
@@ -49,6 +53,7 @@
 ### Tests
 
 - Add coverage for presets and Refresh Free regeneration.
+- Add live coverage for the `free` preset.
 - Add regression coverage for YouTube transcript handling and metrics formatting.
 
 ## 0.4.0 - 2025-12-21
