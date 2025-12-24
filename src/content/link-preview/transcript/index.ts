@@ -74,7 +74,12 @@ export const resolveTranscriptForLink = async (
     kind: 'transcript-start',
     url: normalizedUrl,
     service: provider.id,
-    hint: provider.id,
+    hint:
+      provider.id === 'youtube'
+        ? 'YouTube: resolving transcript'
+        : provider.id === 'podcast'
+          ? 'Podcast: resolving transcript'
+          : 'Transcript: resolving',
   })
 
   const providerResult = await executeProvider(provider, baseContext, {

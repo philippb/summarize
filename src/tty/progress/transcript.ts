@@ -22,6 +22,7 @@ export function createTranscriptProgressRenderer({
     totalBytes: number | null
     startedAtMs: number | null
     whisperProviderHint: 'cpp' | 'openai' | 'fal' | 'openai->fal' | 'unknown'
+    whisperModelId: string | null
     whisperProcessedSeconds: number | null
     whisperTotalSeconds: number | null
     whisperPartIndex: number | null
@@ -34,6 +35,7 @@ export function createTranscriptProgressRenderer({
     totalBytes: null,
     startedAtMs: null,
     whisperProviderHint: 'unknown',
+    whisperModelId: null,
     whisperProcessedSeconds: null,
     whisperTotalSeconds: null,
     whisperPartIndex: null,
@@ -91,6 +93,10 @@ export function createTranscriptProgressRenderer({
 
   const renderWhisperLine = () => {
     const provider = formatProvider(state.whisperProviderHint)
+    const providerLabel =
+      state.whisperModelId && state.whisperProviderHint !== 'cpp'
+        ? `${provider}, ${state.whisperModelId}`
+        : provider
     const svc =
       state.service === 'podcast' ? 'podcast' : state.service === 'youtube' ? 'youtube' : 'media'
     const elapsedMs = typeof state.startedAtMs === 'number' ? Date.now() - state.startedAtMs : 0
@@ -115,7 +121,7 @@ export function createTranscriptProgressRenderer({
         ? `, ${state.whisperPartIndex}/${state.whisperParts}`
         : ''
 
-    return `Transcribing (${svc}, ${provider}${duration}${parts}, ${elapsed})…`
+    return `Transcribing (${svc}, ${providerLabel}${duration}${parts}, ${elapsed})…`
   }
 
   return {
@@ -156,6 +162,7 @@ export function createTranscriptProgressRenderer({
         state.phase = 'whisper'
         state.service = event.service
         state.whisperProviderHint = event.providerHint
+        state.whisperModelId = event.modelId
         state.whisperProcessedSeconds = null
         state.whisperTotalSeconds = event.totalDurationSeconds
         state.whisperPartIndex = null

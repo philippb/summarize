@@ -66,6 +66,7 @@ export type LinkPreviewProgressEvent =
       url: string
       service: 'youtube' | 'podcast' | 'generic'
       providerHint: 'cpp' | 'openai' | 'fal' | 'openai->fal' | 'unknown'
+      modelId: string | null
       totalDurationSeconds: number | null
       parts: number | null
     }

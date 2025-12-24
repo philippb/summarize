@@ -1017,6 +1017,16 @@ async function transcribeMediaUrl({
     totalBytes,
   })
 
+  const modelId =
+    providerHint === 'cpp'
+      ? 'whisper.cpp'
+      : openaiApiKey && falApiKey
+        ? 'whisper-1->fal-ai/wizper'
+        : openaiApiKey
+          ? 'whisper-1'
+          : falApiKey
+            ? 'fal-ai/wizper'
+            : null
   if (!canChunk) {
     const bytes = await downloadCappedBytes(fetchImpl, url, MAX_OPENAI_UPLOAD_BYTES, {
       totalBytes,
@@ -1041,6 +1051,7 @@ async function transcribeMediaUrl({
       url: progress.url,
       service: progress.service,
       providerHint,
+      modelId,
       totalDurationSeconds: durationSecondsHint,
       parts: null,
     })
@@ -1081,6 +1092,7 @@ async function transcribeMediaUrl({
       url: progress.url,
       service: progress.service,
       providerHint,
+      modelId,
       totalDurationSeconds: durationSecondsHint,
       parts: null,
     })
@@ -1124,6 +1136,7 @@ async function transcribeMediaUrl({
       url: progress.url,
       service: progress.service,
       providerHint,
+      modelId,
       totalDurationSeconds: probedDurationSeconds,
       parts: null,
     })

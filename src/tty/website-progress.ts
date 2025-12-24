@@ -90,8 +90,8 @@ export function createWebsiteProgress({
 
       if (event.kind === 'transcript-start') {
         stopAll()
-        const hint = event.hint ? ` (${event.hint})` : ''
-        spinner.setText(`Transcribing${hint}…`)
+        const label = event.hint?.trim()
+        spinner.setText(`${label && label.length > 0 ? label : 'Transcribing'}…`)
       }
     },
   }

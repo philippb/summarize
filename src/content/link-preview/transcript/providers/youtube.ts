@@ -27,9 +27,13 @@ export const fetchTranscript = async (
   const notes: string[] = []
   const { html, url } = context
   const mode = options.youtubeTranscriptMode
+  const progress = typeof options.onProgress === 'function' ? options.onProgress : null
   const hasLocalWhisper = await isWhisperCppReady()
   const hasYtDlpCredentials = Boolean(options.openaiApiKey || options.falApiKey || hasLocalWhisper)
   const canRunYtDlp = Boolean(options.ytDlpPath && hasYtDlpCredentials)
+  const pushHint = (hint: string) => {
+    progress?.({ kind: 'transcript-start', url, service: 'youtube', hint })
+  }
 
   if (mode === 'yt-dlp' && !options.ytDlpPath) {
     throw new Error('Missing YT_DLP_PATH for --youtube yt-dlp')
@@ -55,6 +59,7 @@ export const fetchTranscript = async (
 
   // Try web methods (youtubei, captionTracks) if mode is 'auto' or 'web'
   if (mode === 'auto' || mode === 'web') {
+    pushHint('YouTube: checking captions (youtubei)')
     const config = extractYoutubeiTranscriptConfig(html)
     if (config) {
       attemptedProviders.push('youtubei')
@@ -72,6 +77,11 @@ export const fetchTranscript = async (
       }
     }
 
+    if (!config) {
+      pushHint('YouTube: youtubei unavailable; checking caption tracks')
+    } else {
+      pushHint('YouTube: youtubei empty; checking caption tracks')
+    }
     attemptedProviders.push('captionTracks')
     const captionTranscript = await fetchTranscriptFromCaptionTracks(options.fetch, {
       html,
@@ -90,6 +100,11 @@ export const fetchTranscript = async (
 
   // Try apify if mode is 'auto' or 'apify'
   if (mode === 'auto' || mode === 'apify') {
+    if (mode === 'auto') {
+      pushHint('YouTube: captions missing; trying Apify')
+    } else {
+      pushHint('YouTube: fetching transcript (Apify)')
+    }
     attemptedProviders.push('apify')
     const apifyTranscript = await fetchTranscriptWithApify(
       options.fetch,
@@ -108,12 +123,18 @@ export const fetchTranscript = async (
 
   // Try yt-dlp (audio download + OpenAI/FAL transcription) if mode is 'auto' or 'yt-dlp'
   if (mode === 'yt-dlp' || (mode === 'auto' && canRunYtDlp)) {
+    if (mode === 'auto') {
+      pushHint('YouTube: captions unavailable; falling back to yt-dlp audio')
+    } else {
+      pushHint('YouTube: downloading audio (yt-dlp)')
+    }
     attemptedProviders.push('yt-dlp')
     const ytdlpResult = await fetchTranscriptWithYtDlp({
       ytDlpPath: options.ytDlpPath,
       openaiApiKey: options.openaiApiKey,
       falApiKey: options.falApiKey,
       url,
+      onProgress: progress,
     })
     if (ytdlpResult.notes.length > 0) {
       notes.push(...ytdlpResult.notes)

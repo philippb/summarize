@@ -36,6 +36,7 @@ export function startSpinner({
 
   const setText = (next: string) => {
     spinner.text = next
+    spinner.render()
   }
 
   const spinner = ora({

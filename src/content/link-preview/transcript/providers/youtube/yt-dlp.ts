@@ -5,9 +5,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   isWhisperCppReady,
+  probeMediaDurationSecondsWithFfprobe,
   type TranscriptionProvider,
   transcribeMediaFileWithWhisper,
 } from '../../../../../transcription/whisper.js'
+import type { LinkPreviewProgressEvent } from '../../../deps.js'
+import { ProgressKind } from '../../../deps.js'
 
 const YT_DLP_TIMEOUT_MS = 300_000
 const MAX_STDERR_BYTES = 8192
@@ -24,6 +27,7 @@ type YtDlpRequest = {
   openaiApiKey: string | null
   falApiKey: string | null
   url: string
+  onProgress?: ((event: LinkPreviewProgressEvent) => void) | null
 }
 
 export const fetchTranscriptWithYtDlp = async ({
@@ -31,13 +35,15 @@ export const fetchTranscriptWithYtDlp = async ({
   openaiApiKey,
   falApiKey,
   url,
+  onProgress,
 }: YtDlpRequest): Promise<YtDlpTranscriptResult> => {
   const notes: string[] = []
 
   if (!ytDlpPath) {
     return { text: null, provider: null, error: new Error('YT_DLP_PATH is not configured'), notes }
   }
-  if (!openaiApiKey && !falApiKey && !(await isWhisperCppReady())) {
+  const hasLocalWhisper = await isWhisperCppReady()
+  if (!openaiApiKey && !falApiKey && !hasLocalWhisper) {
     return {
       text: null,
       provider: null,
@@ -48,15 +54,75 @@ export const fetchTranscriptWithYtDlp = async ({
     }
   }
 
+  const progress = typeof onProgress === 'function' ? onProgress : null
+  const providerHint: 'cpp' | 'openai' | 'fal' | 'openai->fal' | 'unknown' =
+    hasLocalWhisper
+      ? 'cpp'
+      : openaiApiKey && falApiKey
+        ? 'openai->fal'
+        : openaiApiKey
+          ? 'openai'
+          : falApiKey
+            ? 'fal'
+            : 'unknown'
+  const modelId =
+    hasLocalWhisper
+      ? 'whisper.cpp'
+      : openaiApiKey && falApiKey
+        ? 'whisper-1->fal-ai/wizper'
+        : openaiApiKey
+          ? 'whisper-1'
+          : falApiKey
+            ? 'fal-ai/wizper'
+            : null
+
   const outputFile = join(tmpdir(), `summarize-${randomUUID()}.mp3`)
   try {
+    progress?.({
+      kind: ProgressKind.TranscriptMediaDownloadStart,
+      url,
+      service: 'youtube',
+      mediaUrl: url,
+      totalBytes: null,
+    })
     await downloadAudio(ytDlpPath, url, outputFile)
+    const stat = await fs.stat(outputFile)
+    progress?.({
+      kind: ProgressKind.TranscriptMediaDownloadDone,
+      url,
+      service: 'youtube',
+      downloadedBytes: stat.size,
+      totalBytes: null,
+    })
+
+    const probedDurationSeconds = await probeMediaDurationSecondsWithFfprobe(outputFile)
+    progress?.({
+      kind: ProgressKind.TranscriptWhisperStart,
+      url,
+      service: 'youtube',
+      providerHint,
+      modelId,
+      totalDurationSeconds: probedDurationSeconds,
+      parts: null,
+    })
     const result = await transcribeMediaFileWithWhisper({
       filePath: outputFile,
       mediaType: 'audio/mpeg',
       filename: 'audio.mp3',
       openaiApiKey,
       falApiKey,
+      totalDurationSeconds: probedDurationSeconds,
+      onProgress: (event) => {
+        progress?.({
+          kind: ProgressKind.TranscriptWhisperProgress,
+          url,
+          service: 'youtube',
+          processedDurationSeconds: event.processedDurationSeconds,
+          totalDurationSeconds: event.totalDurationSeconds,
+          partIndex: event.partIndex,
+          parts: event.parts,
+        })
+      },
     })
     if (result.notes.length > 0) notes.push(...result.notes)
     return { text: result.text, provider: result.provider, error: result.error, notes }
