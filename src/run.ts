@@ -1151,7 +1151,7 @@ function buildBasicLengthPartsForExtracted(extracted: {
   const durationPart =
     typeof extracted.mediaDurationSeconds === 'number' && extracted.mediaDurationSeconds > 0
       ? formatDurationSecondsSmart(extracted.mediaDurationSeconds)
-      : `~${minutesEstimate}m`
+      : `~${minutesEstimate}m audio`
 
   return [`transcript=${durationPart} (~${formatCompactCount(transcriptWords)} words)`]
 }
@@ -1191,14 +1191,11 @@ function buildDetailedLengthPartsForExtracted(extracted: {
       `~${formatCompactCount(transcriptWords)} words`,
       `${formatCompactCount(extracted.transcriptCharacters)} chars`,
     ]
-    if (typeof extracted.transcriptLines === 'number' && extracted.transcriptLines > 0) {
-      details.push(`${formatCompactCount(extracted.transcriptLines)} lines`)
-    }
 
     const durationPart =
       typeof extracted.mediaDurationSeconds === 'number' && extracted.mediaDurationSeconds > 0
         ? formatDurationSecondsSmart(extracted.mediaDurationSeconds)
-        : `~${minutesEstimate}m`
+        : `~${minutesEstimate}m audio`
 
     parts.push(`transcript=${durationPart} (${details.join(', ')})`)
   }
