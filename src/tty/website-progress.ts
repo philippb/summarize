@@ -1,6 +1,11 @@
 import type { LinkPreviewProgressEvent } from '../content/link-preview/deps.js'
 
-import { formatBytes, formatBytesPerSecond, formatElapsedMs } from './format.js'
+import {
+  formatBytes,
+  formatBytesPerSecond,
+  formatDurationSecondsSmart,
+  formatElapsedMs,
+} from './format.js'
 
 export function createWebsiteProgress({
   enabled,
@@ -15,16 +20,42 @@ export function createWebsiteProgress({
   if (!enabled) return null
 
   const state: {
-    phase: 'fetching' | 'firecrawl' | 'bird' | 'nitter' | 'transcript' | 'idle'
+    phase:
+      | 'fetching'
+      | 'firecrawl'
+      | 'bird'
+      | 'nitter'
+      | 'transcript'
+      | 'transcript-download'
+      | 'transcript-whisper'
+      | 'idle'
     htmlDownloadedBytes: number
     htmlTotalBytes: number | null
     fetchStartedAtMs: number | null
+    transcriptDownloadStartedAtMs: number | null
+    transcriptDownloadedBytes: number
+    transcriptTotalBytes: number | null
+    transcriptWhisperStartedAtMs: number | null
+    transcriptWhisperProviderHint: 'openai' | 'fal' | 'openai->fal' | 'unknown' | null
+    transcriptWhisperProcessedSeconds: number | null
+    transcriptWhisperTotalSeconds: number | null
+    transcriptWhisperPartIndex: number | null
+    transcriptWhisperParts: number | null
     lastSpinnerUpdateAtMs: number
   } = {
     phase: 'idle',
     htmlDownloadedBytes: 0,
     htmlTotalBytes: null,
     fetchStartedAtMs: null,
+    transcriptDownloadStartedAtMs: null,
+    transcriptDownloadedBytes: 0,
+    transcriptTotalBytes: null,
+    transcriptWhisperStartedAtMs: null,
+    transcriptWhisperProviderHint: null,
+    transcriptWhisperProcessedSeconds: null,
+    transcriptWhisperTotalSeconds: null,
+    transcriptWhisperPartIndex: null,
+    transcriptWhisperParts: null,
     lastSpinnerUpdateAtMs: 0,
   }
 
@@ -66,11 +97,85 @@ export function createWebsiteProgress({
     return `Fetching website (${downloaded}${total}, ${elapsed}${rate})…`
   }
 
+  const renderTranscriptDownloadLine = () => {
+    const downloaded = formatBytes(state.transcriptDownloadedBytes)
+    const total =
+      typeof state.transcriptTotalBytes === 'number' &&
+      state.transcriptTotalBytes > 0 &&
+      state.transcriptDownloadedBytes <= state.transcriptTotalBytes
+        ? `/${formatBytes(state.transcriptTotalBytes)}`
+        : ''
+    const elapsedMs =
+      typeof state.transcriptDownloadStartedAtMs === 'number'
+        ? Date.now() - state.transcriptDownloadStartedAtMs
+        : 0
+    const elapsed = formatElapsedMs(elapsedMs)
+    if (state.transcriptDownloadedBytes === 0 && !state.transcriptTotalBytes) {
+      return `Downloading audio (connecting, ${elapsed})…`
+    }
+    const rate =
+      elapsedMs > 0 && state.transcriptDownloadedBytes > 0
+        ? `, ${formatBytesPerSecond(state.transcriptDownloadedBytes / (elapsedMs / 1000))}`
+        : ''
+    return `Downloading audio (${downloaded}${total}, ${elapsed}${rate})…`
+  }
+
+  const formatProviderHint = (
+    hint: 'openai' | 'fal' | 'openai->fal' | 'unknown' | null
+  ): string => {
+    if (!hint) return 'Whisper'
+    if (hint === 'openai') return 'Whisper/OpenAI'
+    if (hint === 'fal') return 'Whisper/FAL'
+    if (hint === 'openai->fal') return 'Whisper/OpenAI→FAL'
+    return 'Whisper'
+  }
+
+  const renderTranscriptWhisperLine = () => {
+    const base = 'Transcribing'
+    const provider = formatProviderHint(state.transcriptWhisperProviderHint)
+    const elapsedMs =
+      typeof state.transcriptWhisperStartedAtMs === 'number'
+        ? Date.now() - state.transcriptWhisperStartedAtMs
+        : 0
+    const elapsed = formatElapsedMs(elapsedMs)
+
+    const parts =
+      typeof state.transcriptWhisperPartIndex === 'number' &&
+      typeof state.transcriptWhisperParts === 'number' &&
+      state.transcriptWhisperPartIndex > 0 &&
+      state.transcriptWhisperParts > 0
+        ? `, ${state.transcriptWhisperPartIndex}/${state.transcriptWhisperParts}`
+        : ''
+
+    const duration =
+      typeof state.transcriptWhisperProcessedSeconds === 'number' &&
+      typeof state.transcriptWhisperTotalSeconds === 'number' &&
+      state.transcriptWhisperTotalSeconds > 0
+        ? `, ${formatDurationSecondsSmart(state.transcriptWhisperProcessedSeconds)}/${formatDurationSecondsSmart(
+            state.transcriptWhisperTotalSeconds
+          )}`
+        : typeof state.transcriptWhisperTotalSeconds === 'number' &&
+            state.transcriptWhisperTotalSeconds > 0
+          ? `, ${formatDurationSecondsSmart(state.transcriptWhisperTotalSeconds)}`
+          : ''
+
+    return `${base} (${provider}${duration}${parts}, ${elapsed})…`
+  }
+
   const startTicker = () => {
     if (ticker) return
     ticker = setInterval(() => {
-      if (state.phase !== 'fetching') return
-      updateSpinner(renderFetchLine())
+      if (state.phase === 'fetching') {
+        updateSpinner(renderFetchLine())
+        return
+      }
+      if (state.phase === 'transcript-download') {
+        updateSpinner(renderTranscriptDownloadLine())
+        return
+      }
+      if (state.phase === 'transcript-whisper') {
+        updateSpinner(renderTranscriptWhisperLine())
+      }
     }, 1000)
   }
 
@@ -114,6 +219,56 @@ export function createWebsiteProgress({
         state.htmlDownloadedBytes = event.downloadedBytes
         state.htmlTotalBytes = event.totalBytes
         freezeFetchLine()
+        return
+      }
+
+      if (event.kind === 'transcript-media-download-start') {
+        state.phase = 'transcript-download'
+        state.transcriptDownloadedBytes = 0
+        state.transcriptTotalBytes = event.totalBytes
+        state.transcriptDownloadStartedAtMs = Date.now()
+        startTicker()
+        updateSpinner('Downloading audio (connecting)…', { force: true })
+        return
+      }
+
+      if (event.kind === 'transcript-media-download-progress') {
+        state.phase = 'transcript-download'
+        state.transcriptDownloadedBytes = event.downloadedBytes
+        state.transcriptTotalBytes = event.totalBytes
+        updateSpinner(renderTranscriptDownloadLine())
+        return
+      }
+
+      if (event.kind === 'transcript-media-download-done') {
+        state.phase = 'idle'
+        state.transcriptDownloadedBytes = event.downloadedBytes
+        state.transcriptTotalBytes = event.totalBytes
+        stopTicker()
+        updateSpinner(renderTranscriptDownloadLine(), { force: true })
+        return
+      }
+
+      if (event.kind === 'transcript-whisper-start') {
+        state.phase = 'transcript-whisper'
+        state.transcriptWhisperStartedAtMs = Date.now()
+        state.transcriptWhisperProviderHint = event.providerHint
+        state.transcriptWhisperProcessedSeconds = null
+        state.transcriptWhisperTotalSeconds = event.totalDurationSeconds
+        state.transcriptWhisperPartIndex = null
+        state.transcriptWhisperParts = event.parts
+        startTicker()
+        updateSpinner(renderTranscriptWhisperLine(), { force: true })
+        return
+      }
+
+      if (event.kind === 'transcript-whisper-progress') {
+        state.phase = 'transcript-whisper'
+        state.transcriptWhisperProcessedSeconds = event.processedDurationSeconds
+        state.transcriptWhisperTotalSeconds = event.totalDurationSeconds
+        state.transcriptWhisperPartIndex = event.partIndex
+        state.transcriptWhisperParts = event.parts
+        updateSpinner(renderTranscriptWhisperLine())
         return
       }
 
@@ -189,4 +344,3 @@ export function createWebsiteProgress({
     },
   }
 }
-

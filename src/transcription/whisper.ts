@@ -19,6 +19,17 @@ export type WhisperTranscriptionResult = {
   notes: string[]
 }
 
+export type WhisperProgressEvent = {
+  /** 1-based segment index (only when chunked via ffmpeg). */
+  partIndex: number | null
+  /** Total number of segments (only when chunked via ffmpeg). */
+  parts: number | null
+  /** Best-effort processed duration of the source media. */
+  processedDurationSeconds: number | null
+  /** Best-effort total duration of the source media. */
+  totalDurationSeconds: number | null
+}
+
 export async function transcribeMediaWithWhisper({
   bytes,
   mediaType,
@@ -177,6 +188,8 @@ export async function transcribeMediaFileWithWhisper({
   openaiApiKey,
   falApiKey,
   segmentSeconds = DEFAULT_SEGMENT_SECONDS,
+  totalDurationSeconds = null,
+  onProgress = null,
 }: {
   filePath: string
   mediaType: string
@@ -184,6 +197,8 @@ export async function transcribeMediaFileWithWhisper({
   openaiApiKey: string | null
   falApiKey: string | null
   segmentSeconds?: number
+  totalDurationSeconds?: number | null
+  onProgress?: ((event: WhisperProgressEvent) => void) | null
 }): Promise<WhisperTranscriptionResult> {
   const notes: string[] = []
 
@@ -236,10 +251,16 @@ export async function transcribeMediaFileWithWhisper({
       }
 
       notes.push(`ffmpeg chunked media into ${files.length} parts (${segmentSeconds}s each)`)
+      onProgress?.({
+        partIndex: null,
+        parts: files.length,
+        processedDurationSeconds: null,
+        totalDurationSeconds,
+      })
 
       const parts: string[] = []
       let usedProvider: TranscriptionProvider | null = null
-      for (const name of files) {
+      for (const [index, name] of files.entries()) {
         const segmentPath = join(dir, name)
         const segmentBytes = new Uint8Array(await fs.readFile(segmentPath))
         const result = await transcribeMediaWithWhisper({
@@ -254,6 +275,19 @@ export async function transcribeMediaFileWithWhisper({
           return { text: null, provider: usedProvider, error: result.error, notes }
         }
         if (result.text) parts.push(result.text)
+
+        // Coarse but useful: update based on part boundaries. Duration is best-effort (RSS hints or
+        // ffprobe); the per-part time is stable enough to make the spinner feel alive.
+        const processedSeconds = Math.max(0, (index + 1) * segmentSeconds)
+        onProgress?.({
+          partIndex: index + 1,
+          parts: files.length,
+          processedDurationSeconds:
+            typeof totalDurationSeconds === 'number' && totalDurationSeconds > 0
+              ? Math.min(processedSeconds, totalDurationSeconds)
+              : null,
+          totalDurationSeconds,
+        })
       }
 
       return { text: parts.join('\n\n'), provider: usedProvider, error: null, notes }
@@ -263,6 +297,12 @@ export async function transcribeMediaFileWithWhisper({
   }
 
   const bytes = new Uint8Array(await fs.readFile(filePath))
+  onProgress?.({
+    partIndex: null,
+    parts: null,
+    processedDurationSeconds: null,
+    totalDurationSeconds,
+  })
   const result = await transcribeMediaWithWhisper({
     bytes,
     mediaType,
@@ -272,6 +312,39 @@ export async function transcribeMediaFileWithWhisper({
   })
   if (result.notes.length > 0) notes.push(...result.notes)
   return { ...result, notes }
+}
+
+export async function probeMediaDurationSecondsWithFfprobe(filePath: string): Promise<number | null> {
+  // ffprobe is part of the ffmpeg suite. We keep this optional (best-effort) so environments
+  // without ffmpeg still work; it only powers nicer progress output.
+  return new Promise((resolve) => {
+    const args = [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=noprint_wrappers=1:nokey=1',
+      filePath,
+    ]
+    const proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] })
+    let stdout = ''
+    proc.stdout?.setEncoding('utf8')
+    proc.stdout?.on('data', (chunk: string) => {
+      if (stdout.length > 2048) return
+      stdout += chunk
+    })
+    proc.on('error', () => resolve(null))
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        resolve(null)
+        return
+      }
+      const trimmed = stdout.trim()
+      const parsed = Number(trimmed)
+      resolve(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+    })
+  })
 }
 
 async function transcribeWithOpenAi(

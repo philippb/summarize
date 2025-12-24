@@ -15,6 +15,44 @@ export type LinkPreviewProgressEvent =
       totalBytes: number | null
     }
   | {
+      kind: 'transcript-media-download-start'
+      url: string
+      service: 'youtube' | 'podcast' | 'generic'
+      mediaUrl: string | null
+      totalBytes: number | null
+    }
+  | {
+      kind: 'transcript-media-download-progress'
+      url: string
+      service: 'youtube' | 'podcast' | 'generic'
+      downloadedBytes: number
+      totalBytes: number | null
+    }
+  | {
+      kind: 'transcript-media-download-done'
+      url: string
+      service: 'youtube' | 'podcast' | 'generic'
+      downloadedBytes: number
+      totalBytes: number | null
+    }
+  | {
+      kind: 'transcript-whisper-start'
+      url: string
+      service: 'youtube' | 'podcast' | 'generic'
+      providerHint: 'openai' | 'fal' | 'openai->fal' | 'unknown'
+      totalDurationSeconds: number | null
+      parts: number | null
+    }
+  | {
+      kind: 'transcript-whisper-progress'
+      url: string
+      service: 'youtube' | 'podcast' | 'generic'
+      processedDurationSeconds: number | null
+      totalDurationSeconds: number | null
+      partIndex: number | null
+      parts: number | null
+    }
+  | {
       kind: 'transcript-start'
       url: string
       service: 'youtube' | 'podcast' | 'generic'
