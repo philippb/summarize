@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LinkPreviewProgressEvent } from '../src/content/link-preview/deps.js'
+import { ProgressKind } from '../src/content/link-preview/deps.js'
 import { createWebsiteProgress } from '../src/tty/website-progress.js'
 
 describe('tty/website-progress', () => {
@@ -15,11 +16,11 @@ describe('tty/website-progress', () => {
     })
     expect(progress).not.toBeNull()
 
-    progress!.onProgress({ kind: 'fetch-html-start', url: 'https://example.com' })
+    progress!.onProgress({ kind: ProgressKind.FetchHtmlStart, url: 'https://example.com' })
 
     vi.setSystemTime(162_000)
     progress!.onProgress({
-      kind: 'fetch-html-progress',
+      kind: ProgressKind.FetchHtmlProgress,
       url: 'https://example.com',
       downloadedBytes: 136 * 1024,
       totalBytes: 15 * 1024,
@@ -33,7 +34,7 @@ describe('tty/website-progress', () => {
 
     const beforeDoneCount = texts.length
     progress!.onProgress({
-      kind: 'fetch-html-done',
+      kind: ProgressKind.FetchHtmlDone,
       url: 'https://example.com',
       downloadedBytes: 136 * 1024,
       totalBytes: 15 * 1024,
@@ -56,7 +57,7 @@ describe('tty/website-progress', () => {
     expect(progress).not.toBeNull()
 
     const event: LinkPreviewProgressEvent = {
-      kind: 'transcript-start',
+      kind: ProgressKind.TranscriptStart,
       url: 'https://example.com',
       service: 'podcast',
       hint: 'podcast',
@@ -78,7 +79,7 @@ describe('tty/website-progress', () => {
     expect(progress).not.toBeNull()
 
     progress!.onProgress({
-      kind: 'transcript-media-download-start',
+      kind: ProgressKind.TranscriptMediaDownloadStart,
       url: 'https://example.com',
       service: 'podcast',
       mediaUrl: 'https://cdn.example.com/audio.mp3',
@@ -87,7 +88,7 @@ describe('tty/website-progress', () => {
 
     vi.setSystemTime(162_000)
     progress!.onProgress({
-      kind: 'transcript-media-download-progress',
+      kind: ProgressKind.TranscriptMediaDownloadProgress,
       url: 'https://example.com',
       service: 'podcast',
       downloadedBytes: 136 * 1024,
@@ -101,7 +102,7 @@ describe('tty/website-progress', () => {
     expect(lastDownload).not.toContain('KB/')
 
     progress!.onProgress({
-      kind: 'transcript-media-download-done',
+      kind: ProgressKind.TranscriptMediaDownloadDone,
       url: 'https://example.com',
       service: 'podcast',
       downloadedBytes: 136 * 1024,
@@ -110,7 +111,7 @@ describe('tty/website-progress', () => {
 
     vi.setSystemTime(162_000)
     progress!.onProgress({
-      kind: 'transcript-whisper-start',
+      kind: ProgressKind.TranscriptWhisperStart,
       url: 'https://example.com',
       service: 'podcast',
       providerHint: 'openai',
@@ -120,7 +121,7 @@ describe('tty/website-progress', () => {
 
     vi.setSystemTime(287_000)
     progress!.onProgress({
-      kind: 'transcript-whisper-progress',
+      kind: ProgressKind.TranscriptWhisperProgress,
       url: 'https://example.com',
       service: 'podcast',
       processedDurationSeconds: 600,
@@ -133,6 +134,66 @@ describe('tty/website-progress', () => {
     expect(lastWhisper).toContain('Transcribing (Whisper/OpenAI, 10m/1h')
     expect(lastWhisper).toContain('1/6')
     expect(lastWhisper).toContain('2m 5s')
+
+    vi.useRealTimers()
+  })
+
+  it('renders provider hint variants and omits parts when index is missing', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+
+    const texts: string[] = []
+    const progress = createWebsiteProgress({
+      enabled: true,
+      spinner: { setText: (text) => texts.push(text) },
+    })
+    expect(progress).not.toBeNull()
+
+    progress!.onProgress({
+      kind: ProgressKind.TranscriptWhisperStart,
+      url: 'https://example.com',
+      service: 'podcast',
+      providerHint: 'openai->fal',
+      totalDurationSeconds: null,
+      parts: 6,
+    })
+    expect(texts.at(-1)).toContain('Transcribing (Whisper/OpenAI→FAL')
+
+    progress!.onProgress({
+      kind: ProgressKind.TranscriptWhisperProgress,
+      url: 'https://example.com',
+      service: 'podcast',
+      processedDurationSeconds: null,
+      totalDurationSeconds: null,
+      partIndex: null,
+      parts: 6,
+    })
+    expect(texts.at(-1)).not.toContain('1/6')
+
+    vi.useRealTimers()
+  })
+
+  it('renders total duration when processed duration is unavailable', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+
+    const texts: string[] = []
+    const progress = createWebsiteProgress({
+      enabled: true,
+      spinner: { setText: (text) => texts.push(text) },
+    })
+    expect(progress).not.toBeNull()
+
+    progress!.onProgress({
+      kind: ProgressKind.TranscriptWhisperStart,
+      url: 'https://example.com',
+      service: 'podcast',
+      providerHint: 'fal',
+      totalDurationSeconds: 44,
+      parts: null,
+    })
+
+    expect(texts.at(-1)).toContain('Transcribing (Whisper/FAL, 44s')
 
     vi.useRealTimers()
   })
