@@ -44,5 +44,10 @@ jobs:
           rm -rf _pack
           pnpm pack --pack-destination _pack
           ls -la _pack
-          tar -tf _pack/*.tgz | head -200
-          tar -tf _pack/*.tgz | grep -E '^package/dist/cli\.cjs$'
+          TARBALL="$(find _pack -maxdepth 1 -type f \( -name '*.tgz' -o -name '*.tar.gz' \) | head -1)"
+          if [ -z "${TARBALL:-}" ]; then
+            echo "No pack artifact found in _pack" >&2
+            exit 1
+          fi
+          tar -tf "$TARBALL" | head -200
+          tar -tf "$TARBALL" | grep -E '^package/dist/cli\.cjs$'
