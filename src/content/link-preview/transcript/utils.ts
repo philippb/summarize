@@ -15,6 +15,7 @@ export const isYouTubeUrl = (rawUrl: string): boolean => {
 }
 
 const YOUTUBE_VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/
+const MAX_EMBED_YOUTUBE_TEXT_CHARS = 2000
 
 export function isYouTubeVideoUrl(rawUrl: string): boolean {
   try {
@@ -68,9 +69,15 @@ export function extractYouTubeVideoId(rawUrl: string): string | null {
   return null
 }
 
-export function extractEmbeddedYouTubeUrlFromHtml(html: string): string | null {
+export function extractEmbeddedYouTubeUrlFromHtml(
+  html: string,
+  maxTextChars = MAX_EMBED_YOUTUBE_TEXT_CHARS
+): string | null {
   try {
     const $ = load(html)
+    const rawText = $('body').text() || $.text()
+    const normalizedText = rawText.replace(/\s+/g, ' ').trim()
+    if (normalizedText.length > maxTextChars) return null
     const candidates: string[] = []
 
     const iframeSrc =
