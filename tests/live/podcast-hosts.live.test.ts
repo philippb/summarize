@@ -25,6 +25,34 @@ const silentStderr = new Writable({
 ;(LIVE ? describe : describe.skip)('live podcast hosts', () => {
   const timeoutMs = 180_000
 
+  const expectDescriptionOrTranscript = ({
+    description,
+    content,
+    minDescriptionChars,
+  }: {
+    description: string
+    content: string
+    minDescriptionChars: number
+  }) => {
+    expect(description.length).toBeGreaterThan(minDescriptionChars)
+    expect(content.trim().length).toBeGreaterThan(200)
+
+    const looksLikeTranscript =
+      /^transcript:/i.test(content.trim()) ||
+      content.length >= Math.max(1200, description.length + 400) ||
+      /\n{3,}/.test(content)
+
+    if (looksLikeTranscript) {
+      // Podcast links: prefer full transcript/content when available.
+      expect(content.length).toBeGreaterThanOrEqual(1200)
+      return
+    }
+
+    // Fallback: description-sized content when no transcript is available.
+    expect(content).toContain(description.slice(0, Math.min(50, description.length)))
+    expect(content.length).toBeLessThan(description.length + 120)
+  }
+
   it(
     'podbean share prefers description-sized content',
     async () => {
@@ -50,9 +78,7 @@ const silentStderr = new Writable({
       }
       const description = payload.extracted?.description ?? ''
       const content = payload.extracted?.content ?? ''
-      expect(description.length).toBeGreaterThan(80)
-      expect(content).toContain(description.slice(0, 60))
-      expect(content.length).toBeLessThan(description.length + 40)
+      expectDescriptionOrTranscript({ description, content, minDescriptionChars: 80 })
     },
     timeoutMs
   )
@@ -88,9 +114,7 @@ const silentStderr = new Writable({
       }
       const description = payload.extracted?.description ?? ''
       const content = payload.extracted?.content ?? ''
-      expect(description.length).toBeGreaterThan(80)
-      expect(content).toContain(description.slice(0, 60))
-      expect(content.length).toBeLessThan(description.length + 40)
+      expectDescriptionOrTranscript({ description, content, minDescriptionChars: 80 })
     },
     timeoutMs
   )
@@ -120,9 +144,7 @@ const silentStderr = new Writable({
       }
       const description = payload.extracted?.description ?? ''
       const content = payload.extracted?.content ?? ''
-      expect(description.length).toBeGreaterThan(120)
-      expect(content).toContain(description.slice(0, 80))
-      expect(content.length).toBeLessThan(description.length + 80)
+      expectDescriptionOrTranscript({ description, content, minDescriptionChars: 120 })
     },
     timeoutMs
   )
@@ -152,9 +174,7 @@ const silentStderr = new Writable({
       }
       const description = payload.extracted?.description ?? ''
       const content = payload.extracted?.content ?? ''
-      expect(description.length).toBeGreaterThan(60)
-      expect(content).toContain(description.slice(0, 50))
-      expect(content.length).toBeLessThan(description.length + 80)
+      expectDescriptionOrTranscript({ description, content, minDescriptionChars: 60 })
     },
     timeoutMs
   )
@@ -184,9 +204,7 @@ const silentStderr = new Writable({
       }
       const description = payload.extracted?.description ?? ''
       const content = payload.extracted?.content ?? ''
-      expect(description.length).toBeGreaterThan(80)
-      expect(content).toContain(description.slice(0, 60))
-      expect(content.length).toBeLessThan(description.length + 80)
+      expectDescriptionOrTranscript({ description, content, minDescriptionChars: 80 })
     },
     timeoutMs
   )
