@@ -239,10 +239,10 @@ Non-YouTube URLs go through a “fetch → extract” pipeline. When the direct 
 `--youtube auto` tries best-effort web transcript endpoints first. When captions aren't available, it falls back to:
 
 1. **Apify** (if `APIFY_API_TOKEN` is set): Uses a scraping actor (`faVsWy9VTSNVIhWpR`)
-2. **yt-dlp + Whisper** (if `YT_DLP_PATH` is set): Downloads audio via yt-dlp, transcribes with local `whisper.cpp` when installed (preferred), otherwise falls back to OpenAI (`OPENAI_API_KEY`) or FAL (`FAL_KEY`)
+2. **yt-dlp + Whisper** (if `yt-dlp` is available): Downloads audio via yt-dlp, transcribes with local `whisper.cpp` when installed (preferred), otherwise falls back to OpenAI (`OPENAI_API_KEY`) or FAL (`FAL_KEY`)
 
 Environment variables for yt-dlp mode:
-- `YT_DLP_PATH` - path to yt-dlp binary
+- `YT_DLP_PATH` - optional path to yt-dlp binary (otherwise `yt-dlp` is resolved via `PATH`)
 - `SUMMARIZE_WHISPER_CPP_MODEL_PATH` - optional override for the local `whisper.cpp` model file
 - `SUMMARIZE_WHISPER_CPP_BINARY` - optional override for the local binary (default: `whisper-cli`)
 - `SUMMARIZE_DISABLE_LOCAL_WHISPER_CPP=1` - disable local whisper.cpp (force remote)

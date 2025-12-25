@@ -40,7 +40,12 @@ export const fetchTranscriptWithYtDlp = async ({
   const notes: string[] = []
 
   if (!ytDlpPath) {
-    return { text: null, provider: null, error: new Error('YT_DLP_PATH is not configured'), notes }
+    return {
+      text: null,
+      provider: null,
+      error: new Error('yt-dlp is not configured (set YT_DLP_PATH or ensure yt-dlp is on PATH)'),
+      notes,
+    }
   }
   const hasLocalWhisper = await isWhisperCppReady()
   if (!openaiApiKey && !falApiKey && !hasLocalWhisper) {

@@ -1730,7 +1730,11 @@ export async function runCli(
       : openaiKeyRaw
   const apifyToken =
     typeof envForRun.APIFY_API_TOKEN === 'string' ? envForRun.APIFY_API_TOKEN : null
-  const ytDlpPath = typeof envForRun.YT_DLP_PATH === 'string' ? envForRun.YT_DLP_PATH : null
+  const ytDlpPath = (() => {
+    const explicit = typeof envForRun.YT_DLP_PATH === 'string' ? envForRun.YT_DLP_PATH.trim() : ''
+    if (explicit.length > 0) return explicit
+    return resolveExecutableInPath('yt-dlp', envForRun)
+  })()
   const falApiKey = typeof envForRun.FAL_KEY === 'string' ? envForRun.FAL_KEY : null
   const firecrawlKey =
     typeof envForRun.FIRECRAWL_API_KEY === 'string' ? envForRun.FIRECRAWL_API_KEY : null
