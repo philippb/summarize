@@ -55,7 +55,7 @@ jobs:
           mkdir -p _pack/root _pack/core
 
           pnpm pack --pack-destination _pack/root
-          pnpm -C packages/core pack --pack-destination _pack/core
+          pnpm -C packages/core pack --pack-destination "$PWD/_pack/core"
 
           echo "==> root"
           ls -la _pack/root
