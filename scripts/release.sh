@@ -61,7 +61,7 @@ phase_smoke() {
   run npm view @steipete/summarize version
   run npm view @steipete/summarize-core version
   local version
-  version="$(node -p 'require(\"./package.json\").version')"
+  version="$(node -p 'require("./package.json").version')"
   run bash -c "pnpm -s dlx @steipete/summarize@${version} --help >/dev/null"
   echo "ok"
 }
