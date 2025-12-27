@@ -1,22 +1,11 @@
-import { execFile } from 'node:child_process'
-import { Writable } from 'node:stream'
-
+import { createLinkPreviewClient } from '@steipete/summarize-core/content'
 import { countTokens } from 'gpt-tokenizer'
 
-import { parseGatewayStyleModelId } from '../llm/model-id.js'
-import { buildAutoModelAttempts } from '../model-auto.js'
-import type { FixedModelSpec } from '../model-spec.js'
 import { buildLinkSummaryPrompt } from '../prompts/index.js'
-import { parseCliUserModelId } from '../run/env.js'
-import { buildFinishLineText } from '../run/finish-line.js'
-import { runModelAttempts } from '../run/model-attempts.js'
-import { resolveConfigState } from '../run/run-config.js'
-import { resolveEnvState } from '../run/run-env.js'
-import { createRunMetrics } from '../run/run-metrics.js'
-import { resolveModelSelection } from '../run/run-models.js'
-import { resolveDesiredOutputTokens } from '../run/run-output.js'
-import { createSummaryEngine } from '../run/summary-engine.js'
-import type { ModelAttempt } from '../run/types.js'
+import { buildFinishLineText, buildLengthPartsForFinishLine } from '../run/finish-line.js'
+
+import { formatProgress } from './summarize-progress.js'
+import { createDaemonRunContext, runPrompt } from './summarize-run.js'
 
 export type VisiblePageInput = {
   url: string
@@ -25,9 +14,16 @@ export type VisiblePageInput = {
   truncated: boolean
 }
 
+export type UrlModeInput = {
+  url: string
+  title: string | null
+  maxCharacters: number | null
+}
+
 export type StreamSink = {
   writeChunk: (text: string) => void
   onModelChosen: (modelId: string) => void
+  writeStatus?: ((text: string) => void) | null
 }
 
 export type VisiblePageMetrics = {
@@ -47,19 +43,6 @@ function guessSiteName(url: string): string | null {
   }
 }
 
-function createWritableFromSink(sink: StreamSink): NodeJS.WritableStream {
-  const stream = new Writable({
-    write(chunk, _encoding, callback) {
-      const text =
-        typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : ''
-      if (text) sink.writeChunk(text)
-      callback()
-    },
-  })
-  ;(stream as unknown as { isTTY?: boolean }).isTTY = false
-  return stream
-}
-
 export async function streamSummaryForVisiblePage({
   env,
   fetchImpl,
@@ -73,102 +56,8 @@ export async function streamSummaryForVisiblePage({
   modelOverride: string | null
   sink: StreamSink
 }): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
-  const envForRun = env
   const startedAt = Date.now()
-
-  const {
-    config,
-    configPath,
-    outputLanguage,
-    cliConfigForRun,
-    configForCli,
-    openaiUseChatCompletions,
-  } = resolveConfigState({
-    envForRun,
-    // Minimal CLI defaults expected by config helpers.
-    // Some parsers (e.g. parseVideoMode) assume strings and will crash on undefined.
-    programOpts: { videoMode: 'auto' },
-    languageExplicitlySet: false,
-    videoModeExplicitlySet: false,
-    cliFlagPresent: false,
-    cliProviderArg: null,
-  })
-
-  const {
-    apiKey,
-    openrouterApiKey,
-    openrouterConfigured,
-    xaiApiKey,
-    googleApiKey,
-    anthropicApiKey,
-    zaiApiKey,
-    zaiBaseUrl,
-    googleConfigured,
-    anthropicConfigured,
-    cliAvailability,
-    envForAuto,
-  } = resolveEnvState({ env: envForRun, envForRun, configForCli })
-
-  const {
-    requestedModel,
-    requestedModelLabel,
-    isNamedModelSelection,
-    configForModelSelection,
-    isFallbackModel,
-  } = resolveModelSelection({
-    config,
-    configForCli,
-    configPath,
-    envForRun,
-    explicitModelArg: modelOverride?.trim() ? modelOverride.trim() : null,
-  })
-
-  const fixedModelSpec: FixedModelSpec | null =
-    requestedModel.kind === 'fixed' ? requestedModel : null
-
-  const lengthArg = { kind: 'preset', preset: 'xl' } as const
-  const desiredOutputTokens = resolveDesiredOutputTokens({ lengthArg, maxOutputTokensArg: null })
-
-  const metrics = createRunMetrics({ env: envForRun, fetchImpl, maxOutputTokensArg: null })
-  const llmCalls = metrics.llmCalls
-
-  const stdout = createWritableFromSink(sink)
-  const stderr = createWritableFromSink({ writeChunk: () => {}, onModelChosen: () => {} })
-
-  const summaryEngine = createSummaryEngine({
-    env: envForRun,
-    envForRun,
-    stdout,
-    stderr,
-    execFileImpl: execFile,
-    timeoutMs: 120_000,
-    retries: 1,
-    streamingEnabled: true,
-    plain: true,
-    verbose: false,
-    verboseColor: false,
-    openaiUseChatCompletions,
-    cliConfigForRun: cliConfigForRun ?? null,
-    cliAvailability,
-    trackedFetch: metrics.trackedFetch,
-    resolveMaxOutputTokensForCall: metrics.resolveMaxOutputTokensForCall,
-    resolveMaxInputTokensForCall: metrics.resolveMaxInputTokensForCall,
-    llmCalls,
-    clearProgressForStdout: () => {},
-    apiKeys: {
-      xaiApiKey,
-      openaiApiKey: apiKey,
-      googleApiKey,
-      anthropicApiKey,
-      openrouterApiKey,
-    },
-    keyFlags: {
-      googleConfigured,
-      anthropicConfigured,
-      openrouterConfigured,
-    },
-    zai: { apiKey: zaiApiKey, baseUrl: zaiBaseUrl },
-  })
+  const ctx = createDaemonRunContext({ env, fetchImpl, modelOverride, sink })
 
   const prompt = buildLinkSummaryPrompt({
     url: input.url,
@@ -178,115 +67,30 @@ export async function streamSummaryForVisiblePage({
     content: input.text,
     truncated: input.truncated,
     hasTranscript: false,
-    summaryLength: lengthArg.preset,
-    outputLanguage,
+    summaryLength: 'xl',
+    outputLanguage: ctx.outputLanguage,
     shares: [],
   })
   const promptTokens = countTokens(prompt)
 
-  const attempts: ModelAttempt[] = await (async () => {
-    if (isFallbackModel) {
-      const catalog = await metrics.getLiteLlmCatalog()
-      const all = buildAutoModelAttempts({
-        kind: 'website',
-        promptTokens,
-        desiredOutputTokens,
-        requiresVideoUnderstanding: false,
-        env: envForAuto,
-        config: configForModelSelection,
-        catalog,
-        openrouterProvidersFromEnv: null,
-        cliAvailability,
-      })
-      return all.map((attempt) => {
-        if (attempt.transport !== 'cli')
-          return summaryEngine.applyZaiOverrides(attempt as ModelAttempt)
-        const parsed = parseCliUserModelId(attempt.userModelId)
-        return { ...attempt, cliProvider: parsed.provider, cliModel: parsed.model }
-      })
-    }
-
-    if (!fixedModelSpec) throw new Error('Internal error: missing fixed model spec')
-    if (fixedModelSpec.transport === 'cli') {
-      return [
-        {
-          transport: 'cli',
-          userModelId: fixedModelSpec.userModelId,
-          llmModelId: null,
-          cliProvider: fixedModelSpec.cliProvider,
-          cliModel: fixedModelSpec.cliModel,
-          openrouterProviders: null,
-          forceOpenRouter: false,
-          requiredEnv: fixedModelSpec.requiredEnv,
-        },
-      ]
-    }
-
-    const openaiOverrides =
-      fixedModelSpec.requiredEnv === 'Z_AI_API_KEY'
-        ? {
-            openaiApiKeyOverride: zaiApiKey,
-            openaiBaseUrlOverride: zaiBaseUrl,
-            forceChatCompletions: true,
-          }
-        : {}
-
-    return [
-      {
-        transport: fixedModelSpec.transport === 'openrouter' ? 'openrouter' : 'native',
-        userModelId: fixedModelSpec.userModelId,
-        llmModelId: fixedModelSpec.llmModelId,
-        openrouterProviders: fixedModelSpec.openrouterProviders,
-        forceOpenRouter: fixedModelSpec.forceOpenRouter,
-        requiredEnv: fixedModelSpec.requiredEnv,
-        ...openaiOverrides,
-      } as ModelAttempt,
-    ]
-  })()
-
-  const { result, usedAttempt, missingRequiredEnvs, lastError } = await runModelAttempts({
-    attempts,
-    isFallbackModel,
-    isNamedModelSelection,
-    envHasKeyFor: summaryEngine.envHasKeyFor,
-    formatMissingModelError: summaryEngine.formatMissingModelError,
-    runAttempt: async (attempt) => {
-      return summaryEngine.runSummaryAttempt({
-        attempt,
-        prompt,
-        allowStreaming: true,
-        onModelChosen: (modelId) => sink.onModelChosen(modelId),
-      })
-    },
+  const { usedModel } = await runPrompt({
+    ctx,
+    prompt,
+    promptTokens,
+    kind: 'website',
+    requiresVideoUnderstanding: false,
+    sink,
   })
 
-  if (!result || !usedAttempt) {
-    const missing = [...missingRequiredEnvs].join(', ')
-    const msg =
-      missing.length > 0
-        ? `Missing required env vars for auto selection: ${missing}`
-        : lastError instanceof Error
-          ? lastError.message
-          : 'Summary failed'
-    throw new Error(msg)
-  }
-
-  const canonicalUsedModel =
-    usedAttempt.transport === 'cli'
-      ? usedAttempt.userModelId
-      : usedAttempt.llmModelId
-        ? parseGatewayStyleModelId(usedAttempt.llmModelId).canonical
-        : requestedModelLabel
-
-  const report = await metrics.buildReport()
-  const costUsd = await metrics.estimateCostUsd()
+  const report = await ctx.metrics.buildReport()
+  const costUsd = await ctx.metrics.estimateCostUsd()
   const elapsedMs = Date.now() - startedAt
 
   const label = guessSiteName(input.url)
   const compact = buildFinishLineText({
     elapsedMs,
     label,
-    model: canonicalUsedModel,
+    model: usedModel,
     report,
     costUsd,
     detailed: false,
@@ -295,7 +99,7 @@ export async function streamSummaryForVisiblePage({
   const extended = buildFinishLineText({
     elapsedMs,
     label,
-    model: canonicalUsedModel,
+    model: usedModel,
     report,
     costUsd,
     detailed: true,
@@ -303,7 +107,121 @@ export async function streamSummaryForVisiblePage({
   })
 
   return {
-    usedModel: canonicalUsedModel,
+    usedModel,
+    metrics: {
+      elapsedMs,
+      summary: compact.line,
+      details: compact.details,
+      summaryDetailed: extended.line,
+      detailsDetailed: extended.details,
+    },
+  }
+}
+
+export async function streamSummaryForUrl({
+  env,
+  fetchImpl,
+  input,
+  modelOverride,
+  sink,
+}: {
+  env: Record<string, string | undefined>
+  fetchImpl: typeof fetch
+  input: UrlModeInput
+  modelOverride: string | null
+  sink: StreamSink
+}): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
+  const startedAt = Date.now()
+  const ctx = createDaemonRunContext({ env, fetchImpl, modelOverride, sink })
+
+  const writeStatus = typeof sink.writeStatus === 'function' ? sink.writeStatus : null
+  writeStatus?.('Extracting…')
+
+  const client = createLinkPreviewClient({
+    fetch: fetchImpl,
+    apifyApiToken: ctx.apifyApiToken,
+    ytDlpPath: ctx.ytDlpPath,
+    falApiKey: ctx.falApiKey,
+    openaiApiKey: ctx.openaiTranscriptionKey,
+    scrapeWithFirecrawl: null,
+    onProgress: (event) => {
+      const msg = formatProgress(event)
+      if (msg) writeStatus?.(msg)
+    },
+  })
+
+  const maxCharacters =
+    input.maxCharacters && input.maxCharacters > 0 ? input.maxCharacters : 120_000
+
+  const extracted = await client.fetchLinkContent(input.url, {
+    timeoutMs: 120_000,
+    maxCharacters,
+    cacheMode: 'default',
+    youtubeTranscript: 'auto',
+    firecrawl: 'off',
+    format: 'text',
+    markdownMode: 'readability',
+  })
+
+  writeStatus?.('Summarizing…')
+
+  const hasTranscript =
+    extracted.siteName === 'YouTube' ||
+    (extracted.transcriptSource !== null && extracted.transcriptSource !== 'unavailable')
+
+  const prompt = buildLinkSummaryPrompt({
+    url: extracted.url,
+    title: extracted.title ?? input.title,
+    siteName: extracted.siteName ?? guessSiteName(extracted.url),
+    description: extracted.description,
+    content: extracted.content,
+    truncated: extracted.truncated,
+    hasTranscript,
+    summaryLength: 'xl',
+    outputLanguage: ctx.outputLanguage,
+    shares: [],
+  })
+  const promptTokens = countTokens(prompt)
+
+  const kind = extracted.video?.kind === 'youtube' ? 'youtube' : 'website'
+  const { usedModel } = await runPrompt({
+    ctx,
+    prompt,
+    promptTokens,
+    kind,
+    requiresVideoUnderstanding: extracted.isVideoOnly,
+    sink,
+  })
+
+  const report = await ctx.metrics.buildReport()
+  const costUsd = await ctx.metrics.estimateCostUsd()
+  const elapsedMs = Date.now() - startedAt
+
+  const label = extracted.siteName ?? guessSiteName(extracted.url)
+  const compactExtraParts = buildLengthPartsForFinishLine(extracted, false)
+  const detailedExtraParts = buildLengthPartsForFinishLine(extracted, true)
+
+  const compact = buildFinishLineText({
+    elapsedMs,
+    label,
+    model: usedModel,
+    report,
+    costUsd,
+    detailed: false,
+    extraParts: compactExtraParts,
+  })
+  const extended = buildFinishLineText({
+    elapsedMs,
+    label,
+    model: usedModel,
+    report,
+    costUsd,
+    detailed: true,
+    extraParts: detailedExtraParts,
+  })
+
+  return {
+    usedModel,
     metrics: {
       elapsedMs,
       summary: compact.line,

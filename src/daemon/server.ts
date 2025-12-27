@@ -3,10 +3,11 @@ import http from 'node:http'
 
 import type { DaemonConfig } from './config.js'
 import { DAEMON_HOST, DAEMON_PORT_DEFAULT } from './constants.js'
-import { streamSummaryForVisiblePage } from './summarize.js'
+import { streamSummaryForUrl, streamSummaryForVisiblePage } from './summarize.js'
 
 type SessionEvent =
   | { event: 'meta'; data: { model: string } }
+  | { event: 'status'; data: { text: string } }
   | { event: 'chunk'; data: { text: string } }
   | {
       event: 'metrics'
@@ -201,11 +202,17 @@ export async function runDaemonServer({
         const textContent = typeof obj.text === 'string' ? obj.text : ''
         const truncated = Boolean(obj.truncated)
         const modelOverride = typeof obj.model === 'string' ? obj.model.trim() : null
+        const modeRaw = typeof obj.mode === 'string' ? obj.mode.trim().toLowerCase() : ''
+        const mode: 'page' | 'url' = modeRaw === 'url' ? 'url' : 'page'
+        const maxCharacters =
+          typeof obj.maxCharacters === 'number' && Number.isFinite(obj.maxCharacters)
+            ? obj.maxCharacters
+            : null
         if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) {
           json(res, 400, { ok: false, error: 'missing url' }, cors)
           return
         }
-        if (!textContent.trim()) {
+        if (mode === 'page' && !textContent.trim()) {
           json(res, 400, { ok: false, error: 'missing text' }, cors)
           return
         }
@@ -226,15 +233,34 @@ export async function runDaemonServer({
                 session.lastModel = modelId
                 pushToSession(session, { event: 'meta', data: { model: modelId } })
               },
+              writeStatus: (text: string) => {
+                const clean = text.trim()
+                if (!clean) return
+                pushToSession(session, { event: 'status', data: { text: clean } })
+              },
             }
-            const result = await streamSummaryForVisiblePage({
-              env,
-              fetchImpl,
-              modelOverride:
-                modelOverride && modelOverride.toLowerCase() !== 'auto' ? modelOverride : null,
-              input: { url: pageUrl, title, text: textContent, truncated },
-              sink,
-            })
+            const result =
+              mode === 'url'
+                ? await streamSummaryForUrl({
+                    env,
+                    fetchImpl,
+                    modelOverride:
+                      modelOverride && modelOverride.toLowerCase() !== 'auto'
+                        ? modelOverride
+                        : null,
+                    input: { url: pageUrl, title, maxCharacters },
+                    sink,
+                  })
+                : await streamSummaryForVisiblePage({
+                    env,
+                    fetchImpl,
+                    modelOverride:
+                      modelOverride && modelOverride.toLowerCase() !== 'auto'
+                        ? modelOverride
+                        : null,
+                    input: { url: pageUrl, title, text: textContent, truncated },
+                    sink,
+                  })
 
             if (!session.lastModel) {
               session.lastModel = result.usedModel
