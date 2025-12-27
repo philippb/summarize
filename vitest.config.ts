@@ -42,6 +42,8 @@ export default defineConfig({
         '**/dist/**',
         '**/node_modules/**',
         'tests/**',
+        // Daemon is integration-tested / manually tested; unit coverage is noisy + brittle.
+        '**/src/daemon/**',
         // OS/browser integration (exec/sqlite/keychain); covered via higher-level tests.
         '**/src/content/transcript/providers/twitter-cookies-*.ts',
         // Barrels / type-only entrypoints (noise for coverage).
