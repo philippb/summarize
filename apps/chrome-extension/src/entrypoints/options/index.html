@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Summarize Settings</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Summarize Settings</h1>
+      <form id="form">
+        <label>
+          <span>Token</span>
+          <input id="token" type="text" placeholder="(generated in side panel)" />
+        </label>
+        <label>
+          <span>Model</span>
+          <input id="model" type="text" placeholder="auto / free / openai/…" />
+        </label>
+        <label class="row">
+          <input id="auto" type="checkbox" />
+          <span>Auto-summarize when panel is open</span>
+        </label>
+        <label>
+          <span>Max chars (extracted)</span>
+          <input id="maxChars" type="number" min="20000" step="10000" />
+        </label>
+        <label>
+          <span>Font family (CSS)</span>
+          <input id="fontFamily" type="text" />
+        </label>
+        <label>
+          <span>Font size</span>
+          <input id="fontSize" type="number" min="12" max="20" step="1" />
+        </label>
+        <div class="buttons">
+          <button type="submit">Save</button>
+          <span id="status" class="status"></span>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+

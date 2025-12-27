@@ -1,0 +1,20 @@
+{
+  "name": "@steipete/summarize-chrome-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt dev",
+    "build": "wxt build",
+    "lint": "wxt lint"
+  },
+  "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.32",
+    "typescript": "^5.9.3",
+    "wxt": "^0.20.13"
+  }
+}

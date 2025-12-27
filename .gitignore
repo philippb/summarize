@@ -7,3 +7,5 @@ coverage
 .pnpm-debug.log
 .turbo
 .cache
+.output
+.wxt

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Summarize</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="title">Summarize</div>
+        <div id="subtitle" class="subtitle"></div>
+      </div>
+      <div class="controls">
+        <button id="summarize" type="button">Summarize</button>
+        <button id="settings" type="button">Settings</button>
+      </div>
+    </header>
+
+    <section class="bar">
+      <label class="toggle">
+        <input id="auto" type="checkbox" />
+        <span>Auto</span>
+      </label>
+      <label class="model">
+        <span>Model</span>
+        <input id="model" type="text" placeholder="auto / free / openai/…" />
+      </label>
+      <label class="font">
+        <span>Font</span>
+        <select id="font">
+          <option value="-apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, system-ui, sans-serif">SF</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="Iowan Old Style, Palatino, serif">Iowan</option>
+          <option value="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace">Mono</option>
+        </select>
+      </label>
+      <label class="size">
+        <span>Size</span>
+        <input id="size" type="range" min="12" max="20" step="1" />
+      </label>
+    </section>
+
+    <main>
+      <div id="setup" class="setup hidden"></div>
+      <div id="status" class="status"></div>
+      <article id="render" class="render"></article>
+      <pre id="raw" class="raw hidden"></pre>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+
