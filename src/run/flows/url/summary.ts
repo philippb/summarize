@@ -275,7 +275,12 @@ export async function summarizeExtractedUrl({
       })
       if (flags.verbose) {
         for (const attempt of list.slice(0, 8)) {
-          writeVerbose(io.stderr, flags.verbose, `auto candidate ${attempt.debug}`, flags.verboseColor)
+          writeVerbose(
+            io.stderr,
+            flags.verbose,
+            `auto candidate ${attempt.debug}`,
+            flags.verboseColor
+          )
         }
       }
       return list.map((attempt) => {

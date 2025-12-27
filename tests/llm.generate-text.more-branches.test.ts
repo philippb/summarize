@@ -1,47 +1,29 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { generateTextWithModelId, streamTextWithModelId } from '../src/llm/generate-text.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-const generateTextMock = vi.fn()
-const streamTextMock = vi.fn()
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  const base = (_modelId: string) => ({ kind: 'responses' as const })
-  return Object.assign(base, {
-    chat: (_modelId: string) => ({ kind: 'chat' as const }),
-  })
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
-}))
-
-vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: () => (_modelId: string) => ({}),
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('llm/generate-text extra branches', () => {
-  it('streamTextWithModelId resolves usage=null when totalUsage rejects and iterator cleanup rejects', async () => {
-    streamTextMock.mockImplementationOnce((_args: unknown) => {
-      const stream = {
-        async *[Symbol.asyncIterator]() {
-          yield 'ok'
-        },
-      }
-      const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<string> & {
-        return: () => Promise<IteratorResult<string>>
-      }
-      iterator.return = () => Promise.reject(new Error('cleanup failed'))
-      return {
-        textStream: { [Symbol.asyncIterator]: () => iterator },
-        totalUsage: Promise.reject(new Error('no usage')),
-      }
-    })
+  it('streamTextWithModelId resolves usage=null when stream.result rejects', async () => {
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(['o', 'k'], makeAssistantMessage({ text: 'ok' }), {
+        error: new Error('no usage'),
+      })
+    )
 
     const result = await streamTextWithModelId({
       modelId: 'openai/gpt-5.2',
@@ -64,23 +46,18 @@ describe('llm/generate-text extra branches', () => {
     await expect(result.usage).resolves.toBeNull()
   })
 
-  it('streamTextWithModelId normalizes anthropic access errors via onError', async () => {
-    let capturedOnError: ((event: { error: unknown }) => void) | null = null
-    streamTextMock.mockImplementationOnce((args: unknown) => {
-      const record = args as { onError?: unknown }
-      capturedOnError =
-        typeof record.onError === 'function'
-          ? (record.onError as (event: { error: unknown }) => void)
-          : null
-      return {
-        textStream: {
-          async *[Symbol.asyncIterator]() {
-            yield 'ok'
-          },
-        },
-        totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-      }
-    })
+  it('streamTextWithModelId normalizes anthropic access errors via error events', async () => {
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(['o', 'k'], makeAssistantMessage({ text: 'ok', provider: 'anthropic' }), {
+        error: Object.assign(new Error('model: claude-3-5-sonnet-latest'), {
+          statusCode: 403,
+          responseBody: JSON.stringify({
+            type: 'error',
+            error: { type: 'permission_error', message: 'model: claude-3-5-sonnet-latest' },
+          }),
+        }),
+      })
+    )
 
     const result = await streamTextWithModelId({
       modelId: 'anthropic/claude-3-5-sonnet-latest',
@@ -97,16 +74,9 @@ describe('llm/generate-text extra branches', () => {
       maxOutputTokens: 10,
     })
 
-    capturedOnError?.({
-      error: Object.assign(new Error('model: claude-3-5-sonnet-latest'), {
-        statusCode: 403,
-        responseBody: JSON.stringify({
-          type: 'error',
-          error: { type: 'permission_error', message: 'model: claude-3-5-sonnet-latest' },
-        }),
-      }),
-    })
-
+    for await (const _chunk of result.textStream) {
+      // Drain stream to observe error event and store lastError.
+    }
     const err = result.lastError()
     expect(err instanceof Error ? err.message : String(err)).toMatch(
       /Anthropic API rejected model/i
@@ -118,10 +88,10 @@ describe('llm/generate-text extra branches', () => {
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0)
     try {
       let calls = 0
-      generateTextMock.mockImplementation(async () => {
+      mocks.completeSimple.mockImplementation(async () => {
         calls += 1
         if (calls === 1) throw new Error('timed out')
-        return { text: 'OK', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 } }
+        return makeAssistantMessage({ text: 'OK' })
       })
 
       const onRetry = vi.fn()
@@ -154,7 +124,7 @@ describe('llm/generate-text extra branches', () => {
   })
 
   it('throws missing key errors for openai/... models', async () => {
-    generateTextMock.mockReset()
+    mocks.completeSimple.mockReset()
     await expect(
       generateTextWithModelId({
         modelId: 'openai/gpt-5.2',

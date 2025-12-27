@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -12,21 +13,29 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({ text: 'OK' }))
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: vi.fn(({ apiKey }: { apiKey: string }) => {
-    return (modelId: string) => ({ provider: 'openai', modelId, apiKey })
-  }),
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli input token limits', () => {
   it('rejects large URL inputs before LLM calls', async () => {
-    generateTextMock.mockReset()
+    mocks.completeSimple.mockImplementation(async (model: any) =>
+      makeAssistantMessage({
+        text: 'OK',
+        provider: model.provider,
+        model: model.id,
+        api: model.api,
+      })
+    )
+    mocks.completeSimple.mockReset()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-input-limit-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -78,6 +87,6 @@ describe('cli input token limits', () => {
         stderr,
       })
     ).rejects.toThrow(/Input token count/i)
-    expect(generateTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(0)
   })
 })

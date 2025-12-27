@@ -2,6 +2,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -9,18 +10,22 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({
-  text: '   ',
-}))
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-}))
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: vi.fn(({ apiKey }: { apiKey: string }) => {
-    return (modelId: string) => ({ provider: 'openai', modelId, apiKey })
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
   }),
+}))
+
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({ text: '   ', provider: model.provider, model: model.id, api: model.api })
+)
+
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli empty summary handling', () => {

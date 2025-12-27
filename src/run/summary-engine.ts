@@ -1,10 +1,10 @@
-import type { ModelMessage } from 'ai'
 import { countTokens } from 'gpt-tokenizer'
 import { createMarkdownStreamer, render as renderMarkdownAnsi } from 'markdansi'
 import type { CliProvider } from '../config.js'
 import { isCliDisabled, runCliModel } from '../llm/cli.js'
 import { streamTextWithModelId } from '../llm/generate-text.js'
 import { parseGatewayStyleModelId } from '../llm/model-id.js'
+import type { PromptPayload } from '../llm/prompt.js'
 import { formatCompactCount } from '../tty/format.js'
 import { createRetryLogger, writeVerbose } from './logging.js'
 import { prepareMarkdownForTerminalStreaming } from './markdown.js'
@@ -121,7 +121,7 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
     cli,
   }: {
     attempt: ModelAttempt
-    prompt: string | ModelMessage[]
+    prompt: PromptPayload
     allowStreaming: boolean
     onModelChosen?: ((modelId: string) => void) | null
     cli?: {
@@ -400,7 +400,7 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
               if (match) plainFlushedLen = match[0].length
             }
             const lastNl = streamed.lastIndexOf('\n')
-              if (lastNl >= 0 && lastNl + 1 > plainFlushedLen) {
+            if (lastNl >= 0 && lastNl + 1 > plainFlushedLen) {
               if (!cleared) {
                 deps.clearProgressForStdout()
                 if (isRichTty(deps.stdout)) deps.stdout.write('\n')

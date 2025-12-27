@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,39 +24,29 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['[A](https://example.com)\n']),
-    totalUsage: Promise.resolve({
-      promptTokens: 100,
-      completionTokens: 50,
-      totalTokens: 150,
-    }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli streamed markdown rendering', () => {
   it('streams rendered markdown (append-only) when stdout is a TTY', async () => {
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['[A](https://example.com)\n'],
+        makeAssistantMessage({
+          text: '[A](https://example.com)\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
     const root = mkdtempSync(join(tmpdir(), 'summarize-stream-md-'))
     const cacheDir = join(root, '.summarize', 'cache')
     mkdirSync(cacheDir, { recursive: true })
@@ -114,16 +105,15 @@ describe('cli streamed markdown rendering', () => {
   })
 
   it('does not add an extra blank line before headings', async () => {
-    streamTextMock.mockImplementationOnce(() => {
-      return {
-        textStream: createTextStream(['A\n\n## B\n']),
-        totalUsage: Promise.resolve({
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        }),
-      }
-    })
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(
+        ['A\n\n## B\n'],
+        makeAssistantMessage({
+          text: 'A\n\n## B\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-stream-md-'))
     const cacheDir = join(root, '.summarize', 'cache')

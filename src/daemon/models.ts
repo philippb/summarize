@@ -44,7 +44,7 @@ async function discoverOpenAiCompatibleModelIds({
   timeoutMs,
 }: {
   baseUrl: string
-  apiKey: string
+  apiKey: string | null
   fetchImpl: typeof fetch
   timeoutMs: number
 }): Promise<string[]> {
@@ -56,9 +56,7 @@ async function discoverOpenAiCompatibleModelIds({
   try {
     const res = await fetchImpl(modelsUrl, {
       method: 'GET',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-      },
+      headers: apiKey ? { authorization: `Bearer ${apiKey}` } : undefined,
       signal: controller.signal,
     })
     if (!res.ok) return []
@@ -166,7 +164,6 @@ export async function buildModelPickerOptions({
 
   if (
     openaiBaseUrl &&
-    envState.apiKey &&
     !isProbablyOpenRouterBaseUrl(openaiBaseUrl) &&
     !isProbablyZaiBaseUrl(openaiBaseUrl)
   ) {

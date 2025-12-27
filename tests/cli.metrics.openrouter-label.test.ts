@@ -5,27 +5,30 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
-const generateTextMock = vi.fn(async () => ({
-  text: 'OK',
-  usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-  streamText: () => {
-    throw new Error('unexpected streamText call')
-  },
-}))
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({
+    text: 'OK',
+    provider: model.provider,
+    model: model.id,
+    api: model.api,
+    usage: { input: 1, output: 1, totalTokens: 2 },
+  })
+)
 
-const createOpenAIMock = vi.fn(() => {
-  const responsesModel = (_modelId: string) => ({ kind: 'responses' })
-  const chatModel = (_modelId: string) => ({ kind: 'chat' })
-  return Object.assign(responsesModel, { chat: chatModel })
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 function collectStream() {

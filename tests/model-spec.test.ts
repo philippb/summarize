@@ -69,6 +69,6 @@ describe('model spec parsing', () => {
     expect(zai.kind).toBe('fixed')
     expect(zai.transport).toBe('native')
     expect(zai.requiredEnv).toBe('Z_AI_API_KEY')
-    expect(zai.llmModelId).toBe('openai/glm-4.7')
+    expect(zai.llmModelId).toBe('zai/glm-4.7')
   })
 })

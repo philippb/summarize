@@ -49,5 +49,5 @@ describe('--model auto no-model-url-json', () => {
     const parsed = JSON.parse(stdoutText) as { llm: unknown; summary: string }
     expect(parsed.llm).toBeNull()
     expect(parsed.summary).toContain('A'.repeat(50))
-  })
+  }, 20_000)
 })

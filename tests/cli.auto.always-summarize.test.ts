@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -12,16 +13,27 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({ text: 'SUMMARY' }))
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: vi.fn(({ apiKey }: { apiKey: string }) => {
-    return (modelId: string) => ({ provider: 'openai', modelId, apiKey })
-  }),
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({
+    text: 'SUMMARY',
+    provider: model.provider,
+    model: model.id,
+    api: model.api,
+  })
+)
+
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 const collectStdout = () => {
@@ -43,7 +55,7 @@ const silentStderr = new Writable({
 
 describe('--model auto', () => {
   it('uses an LLM even when extracted content is short', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'SUMMARY' })
+    mocks.completeSimple.mockClear()
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.url
       if (url === 'https://example.com') {
@@ -64,11 +76,11 @@ describe('--model auto', () => {
 
     expect(out.getText()).toMatch(/summary/i)
     expect(out.getText()).not.toMatch(/hello world/i)
-    expect(generateTextMock).toHaveBeenCalled()
+    expect(mocks.completeSimple).toHaveBeenCalled()
   })
 
   it('uses an LLM in --json mode (llm != null)', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'SUMMARY' })
+    mocks.completeSimple.mockClear()
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.url
       if (url === 'https://example.com') {
@@ -96,7 +108,7 @@ describe('--model auto', () => {
   })
 
   it('uses an LLM for local text files (does not echo file)', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'SUMMARY' })
+    mocks.completeSimple.mockClear()
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'summarize-test-'))
     const filePath = path.join(tmpDir, 'input.txt')
     await fs.writeFile(filePath, 'Hello world\n', 'utf8')
@@ -111,6 +123,6 @@ describe('--model auto', () => {
 
     expect(out.getText()).toMatch(/summary/i)
     expect(out.getText()).not.toMatch(/hello world/i)
-    expect(generateTextMock).toHaveBeenCalled()
+    expect(mocks.completeSimple).toHaveBeenCalled()
   })
 })

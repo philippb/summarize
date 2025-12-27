@@ -5,15 +5,15 @@ import type { CacheState } from '../cache.js'
 import type { ExtractedLinkContent, LinkPreviewProgressEvent } from '../content/index.js'
 import type { ExecFileFn } from '../markitdown.js'
 import type { FixedModelSpec } from '../model-spec.js'
-import { resolveDesiredOutputTokens } from '../run/run-output.js'
+import type { AssetSummaryContext, SummarizeAssetArgs } from '../run/flows/asset/summary.js'
+import { summarizeAsset as summarizeAssetFlow } from '../run/flows/asset/summary.js'
+import type { UrlFlowContext } from '../run/flows/url/types.js'
 import { resolveConfigState } from '../run/run-config.js'
 import { resolveEnvState } from '../run/run-env.js'
 import { createRunMetrics } from '../run/run-metrics.js'
 import { resolveModelSelection } from '../run/run-models.js'
+import { resolveDesiredOutputTokens } from '../run/run-output.js'
 import { createSummaryEngine } from '../run/summary-engine.js'
-import { summarizeAsset as summarizeAssetFlow } from '../run/flows/asset/summary.js'
-import type { AssetSummaryContext, SummarizeAssetArgs } from '../run/flows/asset/summary.js'
-import type { UrlFlowContext } from '../run/flows/url/types.js'
 
 import { resolveDaemonOutputLanguage, resolveDaemonSummaryLength } from './request-settings.js'
 
@@ -128,7 +128,8 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     explicitModelArg: modelOverride?.trim() ? modelOverride.trim() : null,
   })
 
-  const fixedModelSpec: FixedModelSpec | null = requestedModel.kind === 'fixed' ? requestedModel : null
+  const fixedModelSpec: FixedModelSpec | null =
+    requestedModel.kind === 'fixed' ? requestedModel : null
 
   const { lengthArg } = resolveDaemonSummaryLength(lengthRaw)
   const desiredOutputTokens = resolveDesiredOutputTokens({ lengthArg, maxOutputTokensArg: null })
@@ -325,14 +326,14 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
       llmCalls: metrics.llmCalls,
     },
     cache,
-  hooks: {
-    onModelChosen: hooks?.onModelChosen ?? null,
-    onExtracted: hooks?.onExtracted ?? null,
-    onLinkPreviewProgress: hooks?.onLinkPreviewProgress ?? null,
-    onSummaryCached: hooks?.onSummaryCached ?? null,
-    setTranscriptionCost: metrics.setTranscriptionCost,
-    summarizeAsset: (assetArgs: SummarizeAssetArgs) =>
-      summarizeAssetFlow(assetSummaryContext, assetArgs),
+    hooks: {
+      onModelChosen: hooks?.onModelChosen ?? null,
+      onExtracted: hooks?.onExtracted ?? null,
+      onLinkPreviewProgress: hooks?.onLinkPreviewProgress ?? null,
+      onSummaryCached: hooks?.onSummaryCached ?? null,
+      setTranscriptionCost: metrics.setTranscriptionCost,
+      summarizeAsset: (assetArgs: SummarizeAssetArgs) =>
+        summarizeAssetFlow(assetSummaryContext, assetArgs),
       writeViaFooter: () => {},
       clearProgressForStdout: () => {},
       setClearProgressBeforeStdout: () => {},

@@ -76,7 +76,8 @@ describe('asset loaders', () => {
 
     const loaded = await loadLocalAsset({ filePath: jpgPath, maxBytes: 1024 })
     expect(loaded.attachment.mediaType).toBe('image/jpeg')
-    expect(loaded.attachment.part.type).toBe('image')
+    expect(loaded.attachment.kind).toBe('image')
+    expect(loaded.attachment.bytes).toBeInstanceOf(Uint8Array)
   })
 
   it('detects HTML based on bytes when content-type is missing', async () => {
@@ -105,7 +106,7 @@ describe('asset loaders', () => {
     })
 
     expect(loaded.attachment.mediaType).toBe('image/png')
-    expect(loaded.attachment.part.type).toBe('image')
+    expect(loaded.attachment.kind).toBe('image')
   })
 })
 
@@ -168,9 +169,10 @@ describe('asset helpers', () => {
 
   it('builds prompt messages with attachments', () => {
     const attachment = {
+      kind: 'image',
       mediaType: 'image/png',
       filename: 'image.png',
-      part: { type: 'image', image: new Uint8Array([1, 2, 3]), mediaType: 'image/png' },
+      bytes: new Uint8Array([1, 2, 3]),
     }
     const messages = buildAssetPromptMessages({ promptText: 'Summarize', attachment })
     expect(messages[0]?.role).toBe('user')

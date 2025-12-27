@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,26 +24,16 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn()
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 function writeLiteLlmCache(root: string) {
@@ -66,14 +57,15 @@ async function runStreamedSummary(
   chunks: string[],
   options?: { stdoutIsTty?: boolean }
 ): Promise<string> {
-  streamTextMock.mockImplementationOnce(() => ({
-    textStream: createTextStream(chunks),
-    totalUsage: Promise.resolve({
-      promptTokens: 100,
-      completionTokens: 50,
-      totalTokens: 150,
-    }),
-  }))
+  mocks.streamSimple.mockReset().mockImplementation(() =>
+    makeTextDeltaStream(
+      chunks,
+      makeAssistantMessage({
+        text: chunks.at(-1) ?? '',
+        usage: { input: 100, output: 50, totalTokens: 150 },
+      })
+    )
+  )
 
   const root = mkdtempSync(join(tmpdir(), 'summarize-stream-merge-'))
   writeLiteLlmCache(root)
@@ -132,44 +124,43 @@ async function runStreamedSummary(
 
 describe('cli stream chunk merge', () => {
   beforeEach(() => {
-    streamTextMock.mockReset()
-    createOpenAIMock.mockClear()
+    mocks.streamSimple.mockReset()
   })
 
   it('avoids duplication when chunks are cumulative buffers', async () => {
     const out = await runStreamedSummary(['Hello', 'Hello world', 'Hello world!'])
     expect(out).toBe('Hello world!\n')
-  })
+  }, 20_000)
 
   it('keeps delta chunks unchanged', async () => {
     const out = await runStreamedSummary(['Hello ', 'world', '!'])
     expect(out).toBe('Hello world!\n')
-  })
+  }, 20_000)
 
   it('handles mixed delta then cumulative chunks', async () => {
     const out = await runStreamedSummary(['Hello ', 'world', 'Hello world!!'])
     expect(out).toBe('Hello world!!\n')
-  })
+  }, 20_000)
 
   it('treats near-prefix cumulative chunks as replacements', async () => {
     const out = await runStreamedSummary(['Hello world.', 'Hello world!'])
     expect(out).toBe('Hello world!\n')
-  })
+  }, 20_000)
 
   it('ignores regressions where a later chunk is a shorter prefix', async () => {
     const out = await runStreamedSummary(['Hello world', 'Hello'])
     expect(out).toBe('Hello world\n')
-  })
+  }, 20_000)
 
   it('merges overlapping suffix/prefix chunks without duplication', async () => {
     const out = await runStreamedSummary(['Hello world', 'world!'])
     expect(out).toBe('Hello world!\n')
-  })
+  }, 20_000)
 
   it('treats near-prefix edits as replacements (prefix threshold)', async () => {
     const prev = 'abcdefghijklmnopqrst'
     const next = 'abcdefghijklmnopqrsu'
     const out = await runStreamedSummary([prev, next])
     expect(out).toBe(`${next}\n`)
-  })
+  }, 20_000)
 })

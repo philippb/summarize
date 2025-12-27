@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,36 +24,27 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['OK']),
-    totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('config prompt', () => {
   it('uses config.prompt when --prompt is absent', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['OK'],
+        makeAssistantMessage({ text: 'OK', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-prompt-'))
     const summarizeDir = join(root, '.summarize')
@@ -113,8 +105,10 @@ describe('config prompt', () => {
       }
     )
 
-    const call = streamTextMock.mock.calls[0]?.[0] as unknown as { prompt?: unknown }
-    const promptText = String(call?.prompt ?? '')
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ content?: unknown }>
+    }
+    const promptText = String(context.messages?.[0]?.content ?? '')
     expect(promptText).toContain('<instructions>')
     expect(promptText).toContain('Explain for a kid.')
     expect(promptText).not.toContain('You summarize online articles')

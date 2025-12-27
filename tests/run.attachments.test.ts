@@ -23,30 +23,34 @@ describe('run/attachments', () => {
 
   it('extracts text content from file attachments', () => {
     const a1 = {
+      kind: 'file',
       mediaType: 'application/json',
-      part: { type: 'file', data: '{"ok":true}' },
+      bytes: new TextEncoder().encode('{"ok":true}'),
       filename: 'a.json',
     } as unknown as AssetAttachment
     expect(getTextContentFromAttachment(a1)).toMatchObject({ content: '{"ok":true}' })
 
     const a2 = {
+      kind: 'file',
       mediaType: 'application/xml',
-      part: { type: 'file', data: new TextEncoder().encode('<ok/>') },
+      bytes: new TextEncoder().encode('<ok/>'),
       filename: 'a.xml',
     } as unknown as AssetAttachment
     expect(getTextContentFromAttachment(a2)?.content).toContain('<ok/>')
 
     const a3 = {
+      kind: 'file',
       mediaType: 'application/pdf',
-      part: { type: 'file', data: 'x' },
+      bytes: new TextEncoder().encode('%PDF-1.7'),
     } as unknown as AssetAttachment
     expect(getTextContentFromAttachment(a3)).toBeNull()
   })
 
   it('rejects archive media types', () => {
     const zip = {
+      kind: 'file',
       mediaType: 'application/zip',
-      part: { type: 'file', data: new Uint8Array([1]) },
+      bytes: new Uint8Array([1]),
     } as unknown as AssetAttachment
     expect(() => assertAssetMediaTypeSupported({ attachment: zip, sizeLabel: '1B' })).toThrow(
       /Unsupported file type/i

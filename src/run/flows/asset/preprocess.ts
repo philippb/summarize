@@ -1,6 +1,5 @@
-import type { ModelMessage } from 'ai'
 import type { OutputLanguage } from '../../../language.js'
-import { parseGatewayStyleModelId } from '../../../llm/model-id.js'
+import type { PromptPayload } from '../../../llm/prompt.js'
 import { convertToMarkdownWithMarkitdown } from '../../../markitdown.js'
 import type { FixedModelSpec } from '../../../model-spec.js'
 import { buildFileSummaryPrompt, buildFileTextSummaryPrompt } from '../../../prompts/index.js'
@@ -8,7 +7,6 @@ import type { SummaryLength } from '../../../shared/contracts.js'
 import { formatBytes } from '../../../tty/format.js'
 import {
   type AssetAttachment,
-  assertProviderSupportsAttachment,
   buildAssetPromptPayload,
   getFileBytesFromAttachment,
   getTextContentFromAttachment,
@@ -34,7 +32,7 @@ export type AssetPreprocessContext = {
 }
 
 export type AssetPreprocessResult = {
-  promptPayload: string | Array<ModelMessage>
+  promptPayload: PromptPayload
   promptText: string
   assetFooterParts: string[]
   textContent: { content: string; bytes: number } | null
@@ -55,13 +53,6 @@ export async function prepareAssetPrompt({
   }
 
   const fileBytes = getFileBytesFromAttachment(attachment)
-  const canPreprocessWithMarkitdown =
-    ctx.format === 'markdown' &&
-    ctx.preprocessMode !== 'off' &&
-    hasUvxCli(ctx.env) &&
-    attachment.part.type === 'file' &&
-    fileBytes !== null &&
-    shouldMarkitdownConvertMediaType(attachment.mediaType)
 
   const summaryLengthTarget =
     ctx.lengthArg.kind === 'preset'
@@ -71,7 +62,12 @@ export async function prepareAssetPrompt({
   let promptText = ''
   const assetFooterParts: string[] = []
 
-  const buildAttachmentPromptPayload = () => {
+  const buildImagePromptPayload = () => {
+    if (attachment.kind !== 'image') {
+      throw new Error(
+        'Internal error: tried to build image prompt payload for non-image attachment'
+      )
+    }
     promptText = buildFileSummaryPrompt({
       filename: attachment.filename,
       mediaType: attachment.mediaType,
@@ -112,10 +108,29 @@ export async function prepareAssetPrompt({
   let preprocessedMarkdown: string | null = null
   let usingPreprocessedMarkdown = false
 
-  if (ctx.preprocessMode === 'always' && canPreprocessWithMarkitdown) {
+  // Non-text file attachments require preprocessing (pi-ai message format supports images, but not generic files).
+  if (attachment.kind === 'file' && !textContent) {
     if (!fileBytes) {
       throw new Error('Internal error: missing file bytes for markitdown preprocessing')
     }
+    if (ctx.preprocessMode === 'off') {
+      throw new Error(
+        `This build does not support attaching binary files (${attachment.mediaType}). Enable preprocessing (e.g. --preprocess auto) and install uvx/markitdown.`
+      )
+    }
+    if (!shouldMarkitdownConvertMediaType(attachment.mediaType)) {
+      throw new Error(
+        `Unsupported file type: ${attachment.filename ?? 'file'} (${attachment.mediaType})\n` +
+          `This build can only send text or images to the model. Try a text-like file, an image, or convert this file to text first.`
+      )
+    }
+    if (!hasUvxCli(ctx.env)) {
+      throw withUvxTip(
+        new Error(`Missing uvx/markitdown for preprocessing ${attachment.mediaType}.`),
+        ctx.env
+      )
+    }
+
     try {
       preprocessedMarkdown = await convertToMarkdownWithMarkitdown({
         bytes: fileBytes,
@@ -128,9 +143,7 @@ export async function prepareAssetPrompt({
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(
-        `Failed to preprocess ${attachment.mediaType} with markitdown: ${message} (disable with --preprocess off).`
-      )
+      throw new Error(`Failed to preprocess ${attachment.mediaType} with markitdown: ${message}.`)
     }
     if (Buffer.byteLength(preprocessedMarkdown, 'utf8') > MAX_TEXT_BYTES_DEFAULT) {
       throw new Error(
@@ -141,11 +154,12 @@ export async function prepareAssetPrompt({
     assetFooterParts.push(`markitdown(${attachment.mediaType})`)
   }
 
-  let promptPayload: string | Array<ModelMessage> = buildAttachmentPromptPayload()
-  if (usingPreprocessedMarkdown) {
-    if (!preprocessedMarkdown) {
+  let promptPayload: PromptPayload
+  if (attachment.kind === 'image') {
+    promptPayload = buildImagePromptPayload()
+  } else if (usingPreprocessedMarkdown) {
+    if (!preprocessedMarkdown)
       throw new Error('Internal error: missing markitdown content for preprocessing')
-    }
     promptPayload = buildInlinePromptPayload({
       content: preprocessedMarkdown,
       contentMediaType: 'text/markdown',
@@ -157,70 +171,11 @@ export async function prepareAssetPrompt({
       contentMediaType: attachment.mediaType,
       originalMediaType: attachment.mediaType,
     })
+  } else {
+    throw new Error('Internal error: no prompt payload could be built for asset')
   }
 
-  if (
-    !usingPreprocessedMarkdown &&
-    ctx.fixedModelSpec &&
-    ctx.fixedModelSpec.transport !== 'cli' &&
-    ctx.preprocessMode !== 'off'
-  ) {
-    const fixedParsed = parseGatewayStyleModelId(ctx.fixedModelSpec.llmModelId)
-    try {
-      assertProviderSupportsAttachment({
-        provider: fixedParsed.provider,
-        modelId: ctx.fixedModelSpec.userModelId,
-        attachment: { part: attachment.part, mediaType: attachment.mediaType },
-      })
-    } catch (error) {
-      if (!canPreprocessWithMarkitdown) {
-        if (
-          ctx.format === 'markdown' &&
-          attachment.part.type === 'file' &&
-          shouldMarkitdownConvertMediaType(attachment.mediaType) &&
-          !hasUvxCli(ctx.env)
-        ) {
-          throw withUvxTip(error, ctx.env)
-        }
-        throw error
-      }
-      if (!fileBytes) {
-        throw new Error('Internal error: missing file bytes for markitdown preprocessing')
-      }
-      try {
-        preprocessedMarkdown = await convertToMarkdownWithMarkitdown({
-          bytes: fileBytes,
-          filenameHint: attachment.filename,
-          mediaTypeHint: attachment.mediaType,
-          uvxCommand: ctx.envForRun.UVX_PATH,
-          timeoutMs: ctx.timeoutMs,
-          env: ctx.env,
-          execFileImpl: ctx.execFileImpl,
-        })
-      } catch (markitdownError) {
-        if (ctx.preprocessMode === 'auto') {
-          throw error
-        }
-        const message =
-          markitdownError instanceof Error ? markitdownError.message : String(markitdownError)
-        throw new Error(
-          `Failed to preprocess ${attachment.mediaType} with markitdown: ${message} (disable with --preprocess off).`
-        )
-      }
-      if (Buffer.byteLength(preprocessedMarkdown, 'utf8') > MAX_TEXT_BYTES_DEFAULT) {
-        throw new Error(
-          `Preprocessed Markdown too large (${formatBytes(Buffer.byteLength(preprocessedMarkdown, 'utf8'))}). Limit is ${formatBytes(MAX_TEXT_BYTES_DEFAULT)}.`
-        )
-      }
-      usingPreprocessedMarkdown = true
-      assetFooterParts.push(`markitdown(${attachment.mediaType})`)
-      promptPayload = buildInlinePromptPayload({
-        content: preprocessedMarkdown,
-        contentMediaType: 'text/markdown',
-        originalMediaType: attachment.mediaType,
-      })
-    }
-  }
+  void ctx.fixedModelSpec
 
   return { promptPayload, promptText, assetFooterParts, textContent }
 }

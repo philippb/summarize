@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,36 +24,27 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['Hello']),
-    totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('--language / config.language', () => {
   it('uses config.language when flag is absent', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['Hello'],
+        makeAssistantMessage({ text: 'Hello', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-lang-'))
     const summarizeDir = join(root, '.summarize')
@@ -109,14 +101,22 @@ describe('--language / config.language', () => {
       }
     )
 
-    const call = streamTextMock.mock.calls[0]?.[0] as unknown as { prompt?: unknown }
-    expect(String(call.prompt ?? '')).toContain('Write the answer in German.')
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ content?: unknown }>
+    }
+    expect(String(context.messages?.[0]?.content ?? '')).toContain('Write the answer in German.')
 
     globalFetchSpy.mockRestore()
   })
 
   it('CLI --lang overrides config.language', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['Hello'],
+        makeAssistantMessage({ text: 'Hello', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-lang-override-'))
     const summarizeDir = join(root, '.summarize')
@@ -173,8 +173,10 @@ describe('--language / config.language', () => {
       }
     )
 
-    const call = streamTextMock.mock.calls[0]?.[0] as unknown as { prompt?: unknown }
-    expect(String(call.prompt ?? '')).toContain('Write the answer in English.')
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ content?: unknown }>
+    }
+    expect(String(context.messages?.[0]?.content ?? '')).toContain('Write the answer in English.')
 
     globalFetchSpy.mockRestore()
   })

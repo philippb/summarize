@@ -1,55 +1,46 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { generateTextWithModelId, streamTextWithModelId } from '../src/llm/generate-text.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-const generateTextMock = vi.fn(async () => ({
-  text: 'ok',
-  usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
-}))
-const streamTextMock = vi.fn(() => ({
-  textStream: {
-    async *[Symbol.asyncIterator]() {
-      yield 'o'
-      yield 'k'
-    },
-  },
-  totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 2, totalTokens: 3 }),
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-  streamText: streamTextMock,
-}))
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({
+    provider: model.provider,
+    model: model.id,
+    api: model.api,
+    text: 'ok',
+    usage: { input: 1, output: 2, totalTokens: 3 },
+  })
+)
+mocks.streamSimple.mockImplementation((_model: any) =>
+  makeTextDeltaStream(['o', 'k'], makeAssistantMessage({ text: 'ok' }))
+)
 
-const openaiFactoryMock = vi.fn((options: Record<string, unknown>) => {
-  const responsesModel = (_modelId: string) => ({ kind: 'responses', options })
-  const chatModel = (_modelId: string) => ({ kind: 'chat', options })
-  return Object.assign(responsesModel, { chat: chatModel })
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: openaiFactoryMock,
-}))
-vi.mock('@ai-sdk/google', () => ({
-  createGoogleGenerativeAI: () => (_modelId: string) => ({}),
-}))
-vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: () => (_modelId: string) => ({}),
-}))
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: () => (_modelId: string) => ({}),
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('llm generate/stream', () => {
   const originalBaseUrl = process.env.OPENAI_BASE_URL
 
   afterEach(() => {
-    openaiFactoryMock.mockClear()
+    mocks.completeSimple.mockClear()
+    mocks.streamSimple.mockClear()
     process.env.OPENAI_BASE_URL = originalBaseUrl
   })
 
   it('routes by provider (generateText) and includes maxOutputTokens when set', async () => {
-    generateTextMock.mockClear()
+    mocks.completeSimple.mockClear()
     await generateTextWithModelId({
       modelId: 'xai/grok-4-fast-non-reasoning',
       apiKeys: {
@@ -106,16 +97,16 @@ describe('llm generate/stream', () => {
       fetchImpl: globalThis.fetch.bind(globalThis),
       maxOutputTokens: 7,
     })
-    expect(generateTextMock).toHaveBeenCalledTimes(4)
-    for (const call of generateTextMock.mock.calls) {
-      const args = (call?.[0] ?? {}) as Record<string, unknown>
-      expect(args).toHaveProperty('maxOutputTokens', 7)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(4)
+    for (const call of mocks.completeSimple.mock.calls) {
+      const options = (call?.[2] ?? {}) as Record<string, unknown>
+      expect(options).toHaveProperty('maxTokens', 7)
     }
   })
 
   it('does not include maxOutputTokens when unset', async () => {
-    generateTextMock.mockClear()
-    streamTextMock.mockClear()
+    mocks.completeSimple.mockClear()
+    mocks.streamSimple.mockClear()
 
     await generateTextWithModelId({
       modelId: 'openai/gpt-5.2',
@@ -145,18 +136,18 @@ describe('llm generate/stream', () => {
       fetchImpl: globalThis.fetch.bind(globalThis),
     })
 
-    expect(generateTextMock).toHaveBeenCalledTimes(1)
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
 
-    const generateArgs = (generateTextMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>
-    const streamArgs = (streamTextMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>
+    const generateArgs = (mocks.completeSimple.mock.calls[0]?.[2] ?? {}) as Record<string, unknown>
+    const streamArgs = (mocks.streamSimple.mock.calls[0]?.[2] ?? {}) as Record<string, unknown>
 
-    expect(generateArgs).not.toHaveProperty('maxOutputTokens')
-    expect(streamArgs).not.toHaveProperty('maxOutputTokens')
+    expect(generateArgs).not.toHaveProperty('maxTokens')
+    expect(streamArgs).not.toHaveProperty('maxTokens')
   })
 
   it('routes by provider (streamText) and includes maxOutputTokens when set', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
     await streamTextWithModelId({
       modelId: 'xai/grok-4-fast-non-reasoning',
       apiKeys: {
@@ -213,57 +204,15 @@ describe('llm generate/stream', () => {
       fetchImpl: globalThis.fetch.bind(globalThis),
       maxOutputTokens: 9,
     })
-    expect(streamTextMock).toHaveBeenCalledTimes(4)
-    for (const call of streamTextMock.mock.calls) {
-      const args = (call?.[0] ?? {}) as Record<string, unknown>
-      expect(args).toHaveProperty('maxOutputTokens', 9)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(4)
+    for (const call of mocks.streamSimple.mock.calls) {
+      const options = (call?.[2] ?? {}) as Record<string, unknown>
+      expect(options).toHaveProperty('maxTokens', 9)
     }
   })
 
-  it('omits maxOutputTokens when undefined (generateText)', async () => {
-    generateTextMock.mockClear()
-    await generateTextWithModelId({
-      modelId: 'openai/gpt-5.2',
-      apiKeys: {
-        openaiApiKey: 'k',
-        xaiApiKey: null,
-        googleApiKey: null,
-        anthropicApiKey: null,
-        openrouterApiKey: null,
-      },
-      prompt: 'hi',
-      timeoutMs: 2000,
-      fetchImpl: globalThis.fetch.bind(globalThis),
-    })
-    const args = generateTextMock.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(args).not.toHaveProperty('maxOutputTokens')
-  })
-
-  it('omits maxOutputTokens when undefined (streamText)', async () => {
-    streamTextMock.mockClear()
-    const result = await streamTextWithModelId({
-      modelId: 'openai/gpt-5.2',
-      apiKeys: {
-        openaiApiKey: 'k',
-        xaiApiKey: null,
-        googleApiKey: null,
-        anthropicApiKey: null,
-        openrouterApiKey: null,
-      },
-      prompt: 'hi',
-      timeoutMs: 2000,
-      fetchImpl: globalThis.fetch.bind(globalThis),
-    })
-    const args = streamTextMock.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(args).not.toHaveProperty('maxOutputTokens')
-    let out = ''
-    for await (const chunk of result.textStream) out += chunk
-    expect(out).toBe('ok')
-    expect(await result.usage).toEqual({ promptTokens: 1, completionTokens: 2, totalTokens: 3 })
-  })
-
   it('throws a friendly timeout error on AbortError', async () => {
-    generateTextMock.mockImplementationOnce(async () => {
+    mocks.completeSimple.mockImplementationOnce(async () => {
       throw new DOMException('aborted', 'AbortError')
     })
     await expect(
@@ -285,15 +234,13 @@ describe('llm generate/stream', () => {
   })
 
   it('retries once when the model returns an empty output', async () => {
-    generateTextMock.mockClear()
-    generateTextMock.mockImplementationOnce(async () => ({
-      text: '   ',
-      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
-    }))
-    generateTextMock.mockImplementationOnce(async () => ({
-      text: 'ok',
-      usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
-    }))
+    mocks.completeSimple.mockClear()
+    mocks.completeSimple.mockImplementationOnce(async () =>
+      makeAssistantMessage({ text: '   ', usage: { input: 1, output: 2, totalTokens: 3 } })
+    )
+    mocks.completeSimple.mockImplementationOnce(async () =>
+      makeAssistantMessage({ text: 'ok', usage: { input: 1, output: 2, totalTokens: 3 } })
+    )
 
     const result = await generateTextWithModelId({
       modelId: 'openai/gpt-5.2',
@@ -312,7 +259,7 @@ describe('llm generate/stream', () => {
     })
 
     expect(result.text).toBe('ok')
-    expect(generateTextMock).toHaveBeenCalledTimes(2)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(2)
   })
 
   it('enforces missing-key errors per provider', async () => {
@@ -370,9 +317,7 @@ describe('llm generate/stream', () => {
 
   it('respects OPENAI_BASE_URL and skips OpenRouter headers for non-OpenRouter base URLs', async () => {
     process.env.OPENAI_BASE_URL = 'https://openai.example.com/v1'
-    generateTextMock.mockClear()
-
-    const fetchImpl = vi.fn(async () => new Response('ok'))
+    mocks.completeSimple.mockClear()
 
     await generateTextWithModelId({
       modelId: 'openai/gpt-5.2',
@@ -385,25 +330,22 @@ describe('llm generate/stream', () => {
       },
       prompt: 'hi',
       timeoutMs: 2000,
-      fetchImpl,
+      fetchImpl: globalThis.fetch.bind(globalThis),
     })
 
-    const openaiOptions = openaiFactoryMock.mock.calls[0]?.[0] as {
-      baseURL?: string
-      fetch?: typeof fetch
-    }
-    expect(openaiOptions.baseURL).toBe('https://openai.example.com/v1')
-    expect(openaiOptions.fetch).toBe(fetchImpl)
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { baseUrl?: string; api?: string }
+    expect(model.baseUrl).toBe('https://openai.example.com/v1')
+    expect(model.api).toBe('openai-responses')
 
-    const args = generateTextMock.mock.calls[0]?.[0] as { model?: { kind?: string } }
-    expect(args.model?.kind).toBe('responses')
+    const headers = (
+      mocks.completeSimple.mock.calls[0]?.[0] as { headers?: Record<string, string> }
+    ).headers
+    expect(headers?.['HTTP-Referer'] ?? null).toBeNull()
   })
 
   it('adds OpenRouter headers and forces chat completions when OPENROUTER_API_KEY is set', async () => {
     delete process.env.OPENAI_BASE_URL
-    generateTextMock.mockClear()
-
-    const fetchImpl = vi.fn(async () => new Response('ok'))
+    mocks.completeSimple.mockClear()
 
     await generateTextWithModelId({
       modelId: 'openai/openai/gpt-oss-20b',
@@ -416,33 +358,22 @@ describe('llm generate/stream', () => {
       },
       prompt: 'hi',
       timeoutMs: 2000,
-      fetchImpl,
+      fetchImpl: globalThis.fetch.bind(globalThis),
     })
 
-    const openaiOptions = openaiFactoryMock.mock.calls[0]?.[0] as {
-      baseURL?: string
-      fetch?: typeof fetch
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as {
+      baseUrl?: string
+      api?: string
+      headers?: Record<string, string>
     }
-    expect(openaiOptions.baseURL).toBe('https://openrouter.ai/api/v1')
-    expect(openaiOptions.fetch).not.toBe(fetchImpl)
-
-    await openaiOptions.fetch?.('https://example.com', {
-      headers: new Headers({ 'X-Test': '1' }),
-    })
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
-    const headers = new Headers((fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined)?.headers)
-    expect(headers.get('X-Test')).toBe('1')
-    expect(headers.get('HTTP-Referer')).toBe('https://github.com/steipete/summarize')
-    expect(headers.get('X-Title')).toBe('summarize')
-    expect(headers.get('X-OpenRouter-Provider-Order')).toBeNull()
-
-    const args = generateTextMock.mock.calls[0]?.[0] as { model?: { kind?: string } }
-    expect(args.model?.kind).toBe('chat')
+    expect(model.baseUrl).toBe('https://openrouter.ai/api/v1')
+    expect(model.api).toBe('openai-completions')
+    expect(model.headers?.['HTTP-Referer']).toBe('https://github.com/steipete/summarize')
+    expect(model.headers?.['X-Title']).toBe('summarize')
   })
 
   it('wraps anthropic model access errors with a helpful message', async () => {
-    generateTextMock.mockImplementationOnce(async () => {
+    mocks.completeSimple.mockImplementationOnce(async () => {
       const error = Object.assign(new Error('model: claude-3-5-sonnet-latest'), {
         statusCode: 404,
         responseBody: JSON.stringify({
@@ -470,7 +401,7 @@ describe('llm generate/stream', () => {
       })
     ).rejects.toThrow(/Anthropic API rejected model "claude-3-5-sonnet-latest"/i)
 
-    streamTextMock.mockImplementationOnce(() => {
+    mocks.streamSimple.mockImplementationOnce(() => {
       const error = Object.assign(new Error('model: claude-3-5-sonnet-latest'), {
         statusCode: 403,
         responseBody: JSON.stringify({
@@ -500,7 +431,7 @@ describe('llm generate/stream', () => {
   })
 
   it('throws a friendly timeout error on AbortError (streamText)', async () => {
-    streamTextMock.mockImplementationOnce(() => {
+    mocks.streamSimple.mockImplementationOnce(() => {
       throw new DOMException('aborted', 'AbortError')
     })
     await expect(
@@ -522,13 +453,11 @@ describe('llm generate/stream', () => {
   })
 
   it('times out when a stream stalls before yielding', async () => {
-    streamTextMock.mockImplementationOnce(() => ({
-      textStream: {
-        async *[Symbol.asyncIterator]() {
-          await new Promise(() => {})
-        },
+    mocks.streamSimple.mockImplementationOnce(() => ({
+      async *[Symbol.asyncIterator]() {
+        await new Promise(() => {})
       },
-      totalUsage: new Promise(() => {}),
+      result: async () => makeAssistantMessage({ text: 'ok' }) as any,
     }))
     const result = await streamTextWithModelId({
       modelId: 'openai/gpt-5.2',

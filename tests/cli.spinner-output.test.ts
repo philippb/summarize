@@ -5,30 +5,28 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-const streamTextMock = vi.fn(() => {
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
+}))
+
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
+}))
+
+mocks.streamSimple.mockImplementation(() => {
   throw new Error('should not be called')
 })
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
-}))
-
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
+mocks.completeSimple.mockImplementation(() => {
+  throw new Error('should not be called')
 })
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
-}))
-
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
 
 function collectStream({ isTTY }: { isTTY: boolean }) {
   let text = ''
@@ -160,7 +158,7 @@ describe('cli spinner output', () => {
           stderr: stderr.stream,
         }
       )
-    ).rejects.toThrow(/does not support attaching files/i)
+    ).rejects.toThrow(/uvx\/markitdown/i)
 
     const rawErr = stderr.getText()
     expect(rawErr).toContain('Loading file (1.5 KB)')
@@ -221,16 +219,15 @@ describe('cli spinner output', () => {
   }, 15_000)
 
   it('clears the "Summarizing" spinner line before streaming output', async () => {
-    streamTextMock.mockImplementationOnce(() => {
-      return {
-        textStream: createTextStream(['\nHello', ' world\n']),
-        totalUsage: Promise.resolve({
-          promptTokens: 10,
-          completionTokens: 5,
-          totalTokens: 15,
-        }),
-      }
-    })
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(
+        ['\nHello', ' world\n'],
+        makeAssistantMessage({
+          text: '\nHello world\n',
+          usage: { input: 10, output: 5, totalTokens: 15 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-spinner-stream-'))
     const cacheDir = join(root, '.summarize', 'cache')

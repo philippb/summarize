@@ -13,45 +13,29 @@ function noopStream() {
     },
   })
 }
-
-function createFailingStream(): AsyncIterable<string> {
-  const err = new Error("'file part media type application/pdf' functionality not supported.")
-  ;(err as unknown as { name?: string }).name = 'UnsupportedFunctionalityError'
-  return {
-    [Symbol.asyncIterator]() {
-      return {
-        async next() {
-          throw err
-        },
-      }
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => ({
-  textStream: createFailingStream(),
-  totalUsage: Promise.resolve({
-    promptTokens: 10,
-    completionTokens: 0,
-    totalTokens: 10,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
   }),
 }))
 
-const createXaiMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
-}))
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: createXaiMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli asset inputs (unsupported by provider)', () => {
   it('prints a friendly error when a provider rejects PDF attachments', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockImplementation(() => {
+      throw new Error('should not be called')
+    })
+    mocks.completeSimple.mockImplementation(() => {
+      throw new Error('should not be called')
+    })
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-unsupported-'))
     const pdfPath = join(root, 'test.pdf')
@@ -70,8 +54,8 @@ describe('cli asset inputs (unsupported by provider)', () => {
         }
       )
 
-    await expect(run()).rejects.toThrow(/does not support attaching files/i)
+    await expect(run()).rejects.toThrow(/uvx\/markitdown/i)
     await expect(run()).rejects.toThrow(/application\/pdf/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 })

@@ -288,12 +288,16 @@ export async function resolveTwitterCookies({
   const hasExplicitSources = Boolean(effectiveCookieSource)
 
   if (hasExplicitSources && firstCandidate) {
-    warnings.push(`No cookie store found for ${firstCandidate.label}. yt-dlp will still attempt it.`)
+    warnings.push(
+      `No cookie store found for ${firstCandidate.label}. yt-dlp will still attempt it.`
+    )
     cookies.cookiesFromBrowser = firstCandidate.spec
     cookies.source = firstCandidate.label
     return { cookies, warnings }
   }
 
-  warnings.push('No browser cookies found for X/Twitter. Log into x.com in Chrome, Safari, or Firefox.')
+  warnings.push(
+    'No browser cookies found for X/Twitter. Log into x.com in Chrome, Safari, or Firefox.'
+  )
   return { cookies, warnings }
 }

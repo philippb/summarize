@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ExecFileFn } from '../src/markitdown.js'
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 function noopStream() {
   return new Writable({
@@ -26,61 +27,36 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) {
-        yield chunk
-      }
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => ({
-  textStream: createTextStream(['OK\n']),
-  totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createXaiMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-const createGoogleMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-const createOpenAiMock = vi.fn(() => {
-  const fn = (_modelId: string) => ({})
-  ;(fn as unknown as { chat?: (modelId: string) => unknown }).chat = (_modelId: string) => ({})
-  return fn
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
-}))
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: createXaiMock,
-}))
-
-vi.mock('@ai-sdk/google', () => ({
-  createGoogleGenerativeAI: createGoogleMock,
-}))
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAiMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli preprocess / markitdown integration', () => {
-  it('does not invoke markitdown for file preprocessing unless --format md', async () => {
-    streamTextMock.mockClear()
+  it('requires markitdown for binary files (PDF) in this build', async () => {
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['OK\n'],
+        makeAssistantMessage({ text: 'OK\n', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-preprocess-off-by-format-'))
     const pdfPath = join(root, 'test.pdf')
     writeFileSync(pdfPath, Buffer.from('%PDF-1.7\n%âãÏÓ\n1 0 obj\n<<>>\nendobj\n', 'utf8'))
 
-    const execFileMock = vi.fn(() => {
-      throw new Error('unexpected execFile')
+    const execFileMock = vi.fn((file, args, _opts, cb) => {
+      void file
+      void args
+      cb(new Error('boom'), '', '')
     })
 
     const run = () =>
@@ -97,13 +73,19 @@ describe('cli preprocess / markitdown integration', () => {
         }
       )
 
-    await expect(run()).rejects.toThrow(/does not support attaching files/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
-    expect(execFileMock).toHaveBeenCalledTimes(0)
+    await expect(run()).rejects.toThrow(/Failed to preprocess application\/pdf/i)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
+    expect(execFileMock).toHaveBeenCalledTimes(1)
   })
 
-  it('preprocesses and retries with Markdown when a provider rejects PDF attachments (auto)', async () => {
-    streamTextMock.mockClear()
+  it('preprocesses PDF to Markdown and inlines it into the prompt', async () => {
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['OK\n'],
+        makeAssistantMessage({ text: 'OK\n', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-preprocess-auto-retry-'))
     const pdfPath = join(root, 'test.pdf')
@@ -141,59 +123,59 @@ describe('cli preprocess / markitdown integration', () => {
     )
 
     expect(execFileMock).toHaveBeenCalledTimes(1)
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-    const callArgs = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
-    expect(typeof callArgs.prompt).toBe('string')
-    expect(callArgs.messages).toBeUndefined()
-    expect(String(callArgs.prompt)).toContain('# Converted')
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ content?: unknown }>
+    }
+    expect(String(context.messages?.[0]?.content ?? '')).toContain('# Converted')
     expect(stdout.getText()).toContain('OK')
   })
 
-  it('preprocesses first when --preprocess always is used (even if attachments are supported)', async () => {
-    streamTextMock.mockClear()
+  it('errors when --preprocess off is used for PDFs (no binary attachments)', async () => {
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['OK\n'],
+        makeAssistantMessage({ text: 'OK\n', usage: { input: 1, output: 1, totalTokens: 2 } })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-preprocess-always-'))
     const pdfPath = join(root, 'test.pdf')
     writeFileSync(pdfPath, Buffer.from('%PDF-1.7\n%âãÏÓ\n1 0 obj\n<<>>\nendobj\n', 'utf8'))
 
     const execFileMock = vi.fn((file, args, _opts, cb) => {
-      expect(file).toBe('uvx')
-      expect(args.slice(0, 3)).toEqual(['--from', 'markitdown[all]', 'markitdown'])
+      void file
+      void args
       cb(null, '# Converted\n\nAlways\n', '')
     })
 
-    const stdout = collectStream()
+    const run = () =>
+      runCli(
+        [
+          '--model',
+          'openai/gpt-4o-mini',
+          '--preprocess',
+          'off',
+          '--timeout',
+          '2s',
+          '--stream',
+          'on',
+          pdfPath,
+        ],
+        {
+          env: { OPENAI_API_KEY: 'test', UVX_PATH: 'uvx' },
+          fetch: vi.fn(async () => {
+            throw new Error('unexpected fetch')
+          }) as unknown as typeof fetch,
+          execFile: execFileMock as unknown as ExecFileFn,
+          stdout: noopStream(),
+          stderr: noopStream(),
+        }
+      )
 
-    await runCli(
-      [
-        '--model',
-        'openai/gpt-4o-mini',
-        '--format',
-        'md',
-        '--preprocess',
-        'always',
-        '--timeout',
-        '2s',
-        '--stream',
-        'on',
-        pdfPath,
-      ],
-      {
-        env: { OPENAI_API_KEY: 'test', UVX_PATH: 'uvx' },
-        fetch: vi.fn(async () => {
-          throw new Error('unexpected fetch')
-        }) as unknown as typeof fetch,
-        execFile: execFileMock as unknown as ExecFileFn,
-        stdout: stdout.stream,
-        stderr: noopStream(),
-      }
-    )
-
-    expect(execFileMock).toHaveBeenCalledTimes(1)
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-    const callArgs = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
-    expect(typeof callArgs.prompt).toBe('string')
-    expect(String(callArgs.prompt)).toContain('# Converted')
-    expect(stdout.getText()).toContain('OK')
+    await expect(run()).rejects.toThrow(/does not support attaching binary files/i)
+    expect(execFileMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 })

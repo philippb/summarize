@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -12,18 +13,22 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({ text: 'OK' }))
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  return (modelId: string) => ({ provider: 'openai', modelId, apiKey })
-})
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({ text: 'OK', provider: model.provider, model: model.id, api: model.api })
+)
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 function noopStream(): Writable {
@@ -47,8 +52,7 @@ function captureStream() {
 
 describe('cli config precedence', () => {
   it('uses config file model when --model and SUMMARIZE_MODEL are absent', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -72,12 +76,11 @@ describe('cli config precedence', () => {
       stderr: noopStream(),
     })
 
-    expect(createOpenAIMock).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(1)
   })
 
   it('uses config file model preset when --model and SUMMARIZE_MODEL are absent', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -122,12 +125,11 @@ describe('cli config precedence', () => {
     expect(parsed.input.model).toBe('mypreset')
 
     // --extract means no LLM calls; ensure we didn't try to init a provider.
-    expect(createOpenAIMock).toHaveBeenCalledTimes(0)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(0)
   })
 
   it('prefers SUMMARIZE_MODEL over config file', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -164,6 +166,6 @@ describe('cli config precedence', () => {
     expect(parsed.input.model).toBe('openai/gpt-5.2')
 
     // --extract means no LLM calls; ensure we didn't try to init a provider.
-    expect(createOpenAIMock).toHaveBeenCalledTimes(0)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(0)
   })
 })

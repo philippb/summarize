@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,36 +24,33 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['Cached summary.']),
-    totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
+mocks.streamSimple.mockImplementation(() =>
+  makeTextDeltaStream(
+    ['Cached summary.'],
+    makeAssistantMessage({
+      text: 'Cached summary.',
+      usage: { input: 1, output: 1, totalTokens: 2 },
+    })
+  )
+)
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli cache summary', () => {
   it('reuses cached summaries and extracted content', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-cache-cli-'))
     const summarizeDir = join(root, '.summarize')
@@ -112,7 +110,7 @@ describe('cli cache summary', () => {
       }
     )
 
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
     const first = stdout1.getText()
 
     const stdout2 = collectStream()
@@ -139,7 +137,7 @@ describe('cli cache summary', () => {
       }
     )
 
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(stdout2.getText()).toBe(first)
 

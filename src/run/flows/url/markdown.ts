@@ -47,7 +47,10 @@ export function createMarkdownConverters(
     if (!markdownRequested) return null
 
     // Prefer the explicitly chosen model when it is a native provider (keeps behavior stable).
-    if (ctx.model.requestedModel.kind === 'fixed' && ctx.model.requestedModel.transport === 'native') {
+    if (
+      ctx.model.requestedModel.kind === 'fixed' &&
+      ctx.model.requestedModel.transport === 'native'
+    ) {
       if (ctx.model.fixedModelSpec?.requiredEnv === 'Z_AI_API_KEY') {
         return {
           llmModelId: ctx.model.requestedModel.llmModelId,

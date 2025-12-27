@@ -23,7 +23,8 @@ export async function createCacheStateFromConfig({
     env: envForRun,
     cachePath: config?.cache?.path ?? null,
   })
-  const cacheMaxMb = typeof config?.cache?.maxMb === 'number' ? config.cache.maxMb : DEFAULT_CACHE_MAX_MB
+  const cacheMaxMb =
+    typeof config?.cache?.maxMb === 'number' ? config.cache.maxMb : DEFAULT_CACHE_MAX_MB
   const cacheTtlDays =
     typeof config?.cache?.ttlDays === 'number' ? config.cache.ttlDays : DEFAULT_CACHE_TTL_DAYS
   const cacheMaxBytes = Math.max(0, cacheMaxMb) * 1024 * 1024
@@ -47,4 +48,3 @@ export async function createCacheStateFromConfig({
     path: cachePath,
   }
 }
-

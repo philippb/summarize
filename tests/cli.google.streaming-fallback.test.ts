@@ -3,14 +3,32 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-
+import type { ExecFileFn } from '../src/markitdown.js'
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-const generateTextMock = vi.fn(async () => ({
-  text: 'OK',
-  usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
-const streamTextMock = vi.fn(() => {
+
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
+}))
+
+mocks.completeSimple.mockImplementation(async () =>
+  makeAssistantMessage({
+    text: 'OK',
+    provider: 'google',
+    usage: { input: 10, output: 2, totalTokens: 12 },
+  })
+)
+mocks.streamSimple.mockImplementation(() => {
   const error = new Error(
     'models/gemini-3-flash-preview is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.'
   ) as Error & { url?: string; statusCode?: number; responseBody?: string }
@@ -28,20 +46,6 @@ const streamTextMock = vi.fn(() => {
   throw error
 })
 
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-  streamText: streamTextMock,
-}))
-
-const createGoogleMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  void apiKey
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/google', () => ({
-  createGoogleGenerativeAI: createGoogleMock,
-}))
-
 function collectStream() {
   let text = ''
   const stream = new Writable({
@@ -53,11 +57,18 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
+const execFileMock: ExecFileFn = ((file, args, _options, callback) => {
+  void file
+  void args
+  callback(null, '# converted\n\nhello\n', '')
+  return { pid: 123 } as any
+}) as ExecFileFn
+
 describe('cli google streaming fallback', () => {
   it('falls back to non-streaming when streaming times out', async () => {
-    generateTextMock.mockClear()
-    streamTextMock.mockClear()
-    streamTextMock.mockImplementationOnce(() => {
+    mocks.completeSimple.mockClear()
+    mocks.streamSimple.mockClear()
+    mocks.streamSimple.mockImplementationOnce(() => {
       throw new Error('LLM request timed out')
     })
 
@@ -111,21 +122,22 @@ describe('cli google streaming fallback', () => {
     await runCli(
       ['--model', 'google/gemini-3-flash-preview', '--timeout', '2s', '--stream', 'on', pdfPath],
       {
-        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test' },
+        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test', UVX_PATH: 'uvx' },
         fetch: fetchMock as unknown as typeof fetch,
+        execFile: execFileMock,
         stdout: stdout.stream,
         stderr: stderr.stream,
       }
     )
 
     expect(stdout.getText()).toContain('OK')
-    expect(generateTextMock).toHaveBeenCalledTimes(1)
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to non-streaming when streamGenerateContent is rejected at runtime', async () => {
-    generateTextMock.mockClear()
-    streamTextMock.mockClear()
+    mocks.completeSimple.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-google-stream-fallback-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -177,30 +189,33 @@ describe('cli google streaming fallback', () => {
     await runCli(
       ['--model', 'google/gemini-3-flash-preview', '--timeout', '2s', '--stream', 'on', pdfPath],
       {
-        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test' },
+        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test', UVX_PATH: 'uvx' },
         fetch: fetchMock as unknown as typeof fetch,
+        execFile: execFileMock,
         stdout: stdout.stream,
         stderr: stderr.stream,
       }
     )
 
     expect(stdout.getText()).toContain('OK')
-    expect(generateTextMock).toHaveBeenCalledTimes(1)
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
   })
 
   it('still streams when ListModels omits streamGenerateContent', async () => {
-    generateTextMock.mockClear()
-    streamTextMock.mockClear()
+    mocks.completeSimple.mockClear()
+    mocks.streamSimple.mockClear()
 
-    streamTextMock.mockImplementationOnce(() => ({
-      textStream: {
-        async *[Symbol.asyncIterator]() {
-          yield 'STREAMED'
-        },
-      },
-      totalUsage: Promise.resolve({ promptTokens: 10, completionTokens: 2, totalTokens: 12 }),
-    }))
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(
+        ['STREAMED'],
+        makeAssistantMessage({
+          text: 'STREAMED',
+          provider: 'google',
+          usage: { input: 10, output: 2, totalTokens: 12 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-google-stream-ok-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -252,15 +267,16 @@ describe('cli google streaming fallback', () => {
     await runCli(
       ['--model', 'google/gemini-3-flash-preview', '--timeout', '2s', '--stream', 'on', pdfPath],
       {
-        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test' },
+        env: { HOME: root, GOOGLE_GENERATIVE_AI_API_KEY: 'test', UVX_PATH: 'uvx' },
         fetch: fetchMock as unknown as typeof fetch,
+        execFile: execFileMock,
         stdout: stdout.stream,
         stderr: stderr.stream,
       }
     )
 
     expect(stdout.getText()).toContain('STREAMED')
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-    expect(generateTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
+    expect(mocks.completeSimple).toHaveBeenCalledTimes(0)
   })
 })

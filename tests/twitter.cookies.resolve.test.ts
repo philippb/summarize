@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -18,15 +18,7 @@ describe('twitter cookies resolver (CLI)', () => {
   it('returns cookies-from-browser when chrome store exists', async () => {
     const home = makeTempHome()
     touch(
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Google',
-        'Chrome',
-        'Default',
-        'Cookies'
-      )
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Cookies')
     )
 
     const res = await resolveTwitterCookies({ env: {}, platform: 'darwin', homeDir: home })
@@ -65,15 +57,7 @@ describe('twitter cookies resolver (CLI)', () => {
   it('skips missing sources and returns the first available store', async () => {
     const home = makeTempHome()
     touch(
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Google',
-        'Chrome',
-        'Default',
-        'Cookies'
-      )
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Cookies')
     )
 
     const res = await resolveTwitterCookies({
@@ -110,15 +94,7 @@ describe('twitter cookies resolver (CLI)', () => {
   it('warns about unknown cookie source tokens', async () => {
     const home = makeTempHome()
     touch(
-      path.join(
-        home,
-        'Library',
-        'Application Support',
-        'Google',
-        'Chrome',
-        'Default',
-        'Cookies'
-      )
+      path.join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Default', 'Cookies')
     )
 
     const res = await resolveTwitterCookies({

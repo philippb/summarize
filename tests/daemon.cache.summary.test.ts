@@ -5,37 +5,32 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createCacheStore } from '../src/cache.js'
 import { streamSummaryForVisiblePage } from '../src/daemon/summarize.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['### Overview\n- Cached summary.\n']),
-    totalUsage: Promise.resolve({ promptTokens: 1, completionTokens: 1, totalTokens: 2 }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('daemon summary cache', () => {
   it('reuses cached summary for visible page requests', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['### Overview\n- Cached summary.\n'],
+        makeAssistantMessage({
+          text: '### Overview\n- Cached summary.\n',
+          usage: { input: 1, output: 1, totalTokens: 2 },
+        })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-daemon-cache-'))
     const summarizeDir = join(root, '.summarize')
@@ -97,10 +92,10 @@ describe('daemon summary cache', () => {
     }
 
     const first = await runOnce()
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
 
     const second = await runOnce()
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
     expect(second.out).toBe(first.out)
     expect(second.metrics.summary.split(' · ')[0]).toBe('Cached')
 

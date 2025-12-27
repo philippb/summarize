@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { ModelMessage } from 'ai'
 import mime from 'mime'
 import { buildAssetPromptMessages, type loadLocalAsset } from '../content/asset.js'
+import type { PromptPayload } from '../llm/prompt.js'
 import { formatBytes } from '../tty/format.js'
 
 export type AssetAttachment = Awaited<ReturnType<typeof loadLocalAsset>>['attachment']
@@ -46,17 +46,7 @@ function isArchiveMediaType(mediaType: string): boolean {
 }
 
 function attachmentByteLength(attachment: AssetAttachment) {
-  if (attachment.part.type === 'image') {
-    const image = attachment.part.image
-    if (image instanceof Uint8Array) return image.byteLength
-    if (typeof image === 'string') return image.length
-    return null
-  }
-
-  const data = (attachment.part as { data?: unknown }).data
-  if (data instanceof Uint8Array) return data.byteLength
-  if (typeof data === 'string') return data.length
-  return null
+  return attachment.bytes.byteLength
 }
 
 export function assertAssetMediaTypeSupported({
@@ -86,38 +76,26 @@ export function buildAssetPromptPayload({
 }: {
   promptText: string
   attachment: AssetAttachment
-}): string | Array<ModelMessage> {
+}): PromptPayload {
   return buildAssetPromptMessages({ promptText, attachment })
 }
 
 export function getTextContentFromAttachment(
   attachment: AssetAttachment
 ): { content: string; bytes: number } | null {
-  if (attachment.part.type !== 'file' || !isTextLikeMediaType(attachment.mediaType)) {
+  if (attachment.kind !== 'file' || !isTextLikeMediaType(attachment.mediaType)) {
     return null
   }
-  const data = (attachment.part as { data?: unknown }).data
-  if (typeof data === 'string') {
-    return { content: data, bytes: Buffer.byteLength(data, 'utf8') }
-  }
-  if (data instanceof Uint8Array) {
-    return { content: new TextDecoder().decode(data), bytes: data.byteLength }
-  }
-  return { content: '', bytes: 0 }
+  return { content: new TextDecoder().decode(attachment.bytes), bytes: attachment.bytes.byteLength }
 }
 
 export function getFileBytesFromAttachment(attachment: AssetAttachment): Uint8Array | null {
-  if (attachment.part.type !== 'file') return null
-  const data = (attachment.part as { data?: unknown }).data
-  return data instanceof Uint8Array ? data : null
+  if (attachment.kind !== 'file') return null
+  return attachment.bytes
 }
 
 function getAttachmentBytes(attachment: AssetAttachment): Uint8Array | null {
-  if (attachment.part.type === 'image') {
-    const image = (attachment.part as { image?: unknown }).image
-    return image instanceof Uint8Array ? image : null
-  }
-  return getFileBytesFromAttachment(attachment)
+  return attachment.bytes
 }
 
 export async function ensureCliAttachmentPath({
@@ -166,16 +144,9 @@ export function assertProviderSupportsAttachment({
 }: {
   provider: 'xai' | 'openai' | 'google' | 'anthropic' | 'zai'
   modelId: string
-  attachment: { part: { type: string }; mediaType: string }
+  attachment: { kind: 'image' | 'file'; mediaType: string }
 }) {
-  // xAI via AI SDK currently supports image parts, but not generic file parts (e.g. PDFs).
-  if (
-    provider === 'xai' &&
-    attachment.part.type === 'file' &&
-    !isTextLikeMediaType(attachment.mediaType)
-  ) {
-    throw new Error(
-      `Model ${modelId} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`
-    )
-  }
+  void provider
+  void modelId
+  void attachment
 }

@@ -2,6 +2,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -9,41 +10,29 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({ text: 'OK' }))
-const createOpenAIMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  const createSeeableModel = (modelId: string) => ({ provider: 'openai', modelId, apiKey })
-  return Object.assign(createSeeableModel, {
-    chat: (modelId: string) => ({ provider: 'openai-chat', modelId, apiKey }),
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
+}))
+
+mocks.completeSimple.mockImplementation(async (model: any, _context: any, options: any) =>
+  makeAssistantMessage({
+    provider: model.provider,
+    model: model.id,
+    api: model.api,
+    text: 'OK',
+    usage: { input: 1, output: 1, totalTokens: 2 },
+    ...(options?.signal?.aborted ? { stopReason: 'aborted' } : {}),
   })
-})
-const createGoogleMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  return (modelId: string) => ({ provider: 'google', modelId, apiKey })
-})
-const createXaiMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  return (modelId: string) => ({ provider: 'xai', modelId, apiKey })
-})
-const createAnthropicMock = vi.fn(({ apiKey }: { apiKey: string }) => {
-  return (modelId: string) => ({ provider: 'anthropic', modelId, apiKey })
-})
+)
 
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
-}))
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
-}))
-
-vi.mock('@ai-sdk/google', () => ({
-  createGoogleGenerativeAI: createGoogleMock,
-}))
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: createXaiMock,
-}))
-
-vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: createAnthropicMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 function collectStdout() {
@@ -59,11 +48,7 @@ function collectStdout() {
 
 describe('cli LLM provider selection (direct keys)', () => {
   it('uses OpenAI when --model is openai/...', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
-    createGoogleMock.mockClear()
-    createXaiMock.mockClear()
-    createAnthropicMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -88,18 +73,12 @@ describe('cli LLM provider selection (direct keys)', () => {
     })
 
     expect(out.getText().trim()).toBe('OK')
-    expect(createOpenAIMock).toHaveBeenCalledTimes(1)
-    expect(createGoogleMock).toHaveBeenCalledTimes(0)
-    expect(createXaiMock).toHaveBeenCalledTimes(0)
-    expect(createAnthropicMock).toHaveBeenCalledTimes(0)
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { provider?: string }
+    expect(model.provider).toBe('openai')
   })
 
   it('uses Z.AI when --model is zai/...', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
-    createGoogleMock.mockClear()
-    createXaiMock.mockClear()
-    createAnthropicMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -124,20 +103,15 @@ describe('cli LLM provider selection (direct keys)', () => {
     })
 
     expect(out.getText().trim()).toBe('OK')
-    const openaiOptions = createOpenAIMock.mock.calls[0]?.[0] as {
-      apiKey?: string
-      baseURL?: string
-    }
-    expect(openaiOptions.apiKey).toBe('zai-test')
-    expect(openaiOptions.baseURL).toBe('https://api.z.ai/api/paas/v4')
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { provider?: string; baseUrl?: string }
+    const options = mocks.completeSimple.mock.calls[0]?.[2] as { apiKey?: string }
+    expect(model.provider).toBe('zai')
+    expect(options.apiKey).toBe('zai-test')
+    expect(model.baseUrl).toBe('https://api.z.ai/api/paas/v4')
   })
 
   it('uses Google when --model is google/...', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
-    createGoogleMock.mockClear()
-    createXaiMock.mockClear()
-    createAnthropicMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -162,18 +136,12 @@ describe('cli LLM provider selection (direct keys)', () => {
     })
 
     expect(out.getText().trim()).toBe('OK')
-    expect(createOpenAIMock).toHaveBeenCalledTimes(0)
-    expect(createGoogleMock).toHaveBeenCalledTimes(1)
-    expect(createXaiMock).toHaveBeenCalledTimes(0)
-    expect(createAnthropicMock).toHaveBeenCalledTimes(0)
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { provider?: string }
+    expect(model.provider).toBe('google')
   })
 
   it('uses xAI when --model is xai/...', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
-    createGoogleMock.mockClear()
-    createXaiMock.mockClear()
-    createAnthropicMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -201,18 +169,12 @@ describe('cli LLM provider selection (direct keys)', () => {
     )
 
     expect(out.getText().trim()).toBe('OK')
-    expect(createOpenAIMock).toHaveBeenCalledTimes(0)
-    expect(createGoogleMock).toHaveBeenCalledTimes(0)
-    expect(createXaiMock).toHaveBeenCalledTimes(1)
-    expect(createAnthropicMock).toHaveBeenCalledTimes(0)
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { provider?: string }
+    expect(model.provider).toBe('xai')
   })
 
   it('uses Anthropic when --model is anthropic/...', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
-    createGoogleMock.mockClear()
-    createXaiMock.mockClear()
-    createAnthropicMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -240,9 +202,7 @@ describe('cli LLM provider selection (direct keys)', () => {
     )
 
     expect(out.getText().trim()).toBe('OK')
-    expect(createOpenAIMock).toHaveBeenCalledTimes(0)
-    expect(createGoogleMock).toHaveBeenCalledTimes(0)
-    expect(createXaiMock).toHaveBeenCalledTimes(0)
-    expect(createAnthropicMock).toHaveBeenCalledTimes(1)
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { provider?: string }
+    expect(model.provider).toBe('anthropic')
   })
 })

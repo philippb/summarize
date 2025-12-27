@@ -5,7 +5,6 @@ import {
   type CacheState,
   clearCacheFiles,
   DEFAULT_CACHE_MAX_MB,
-  DEFAULT_CACHE_TTL_DAYS,
   resolveCachePath,
 } from '../cache.js'
 import { loadSummarizeConfig } from '../config.js'
@@ -25,6 +24,7 @@ import {
 import type { ExecFileFn } from '../markitdown.js'
 import type { FixedModelSpec } from '../model-spec.js'
 import { formatVersionLine } from '../version.js'
+import { createCacheStateFromConfig } from './cache-state.js'
 import {
   handleDaemonCliRequest,
   handleHelpRequest,
@@ -35,7 +35,6 @@ import { handleFileInput, handleUrlAsset } from './flows/asset/input.js'
 import { summarizeAsset as summarizeAssetFlow } from './flows/asset/summary.js'
 import { runUrlFlow } from './flows/url/flow.js'
 import { attachRichHelp, buildProgram } from './help.js'
-import { createCacheStateFromConfig } from './cache-state.js'
 import { createProgressGate } from './progress.js'
 import { resolveConfigState } from './run-config.js'
 import { resolveEnvState } from './run-env.js'

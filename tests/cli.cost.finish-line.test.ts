@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,57 +24,41 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['Hello', ' world']),
-    totalUsage: Promise.resolve({
-      promptTokens: 123_456,
-      completionTokens: 7_890,
-      totalTokens: 131_346,
-    }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
+mocks.streamSimple.mockImplementation(() =>
+  makeTextDeltaStream(
+    ['Hello', ' world'],
+    makeAssistantMessage({
+      text: 'Hello world',
+      usage: { input: 123_456, output: 7_890, totalTokens: 131_346 },
+    })
+  )
+)
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
-}))
-
-const createXaiMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: createXaiMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli finish line + metrics', () => {
   it('streams text to stdout and prints token metrics + cost', async () => {
-    streamTextMock.mockReset().mockImplementation(() => {
-      return {
-        textStream: createTextStream(['Hello', ' world']),
-        totalUsage: Promise.resolve({
-          promptTokens: 123_456,
-          completionTokens: 7_890,
-          totalTokens: 131_346,
-        }),
-      }
-    })
+    mocks.streamSimple.mockReset().mockImplementation(() =>
+      makeTextDeltaStream(
+        ['Hello', ' world'],
+        makeAssistantMessage({
+          text: 'Hello world',
+          usage: { input: 123_456, output: 7_890, totalTokens: 131_346 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-finish-line-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -150,16 +135,14 @@ describe('cli finish line + metrics', () => {
   })
 
   it('prints a finish line with cost when token counts are small', async () => {
-    streamTextMock.mockReset().mockImplementation(() => {
-      return {
-        textStream: createTextStream(['Hi']),
-        totalUsage: Promise.resolve({
-          promptTokens: 10,
-          completionTokens: 10,
-          totalTokens: 20,
-        }),
-      }
-    })
+    mocks.streamSimple
+      .mockReset()
+      .mockImplementation(() =>
+        makeTextDeltaStream(
+          ['Hi'],
+          makeAssistantMessage({ text: 'Hi', usage: { input: 10, output: 10, totalTokens: 20 } })
+        )
+      )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-finish-line-small-'))
     const cacheDir = join(root, '.summarize', 'cache')

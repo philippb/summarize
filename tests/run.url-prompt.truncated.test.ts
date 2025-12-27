@@ -49,4 +49,3 @@ describe('buildUrlPrompt', () => {
     expect(prompt).toContain('Note: Content truncated')
   })
 })
-

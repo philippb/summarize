@@ -17,12 +17,22 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-const streamTextMock = vi.fn(() => {
-  throw new Error('should not be called')
-})
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(() => {
+    throw new Error('should not be called')
+  }),
+  completeSimple: vi.fn(() => {
+    throw new Error('should not be called')
+  }),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
+}))
 
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('--model auto no-model-needed', () => {
@@ -45,6 +55,7 @@ describe('--model auto no-model-needed', () => {
 
     expect(stdout.getText()).toContain('hello world')
     expect(stderr.getText()).not.toMatch(/model:/i)
-    expect(streamTextMock).not.toHaveBeenCalled()
+    expect(mocks.streamSimple).not.toHaveBeenCalled()
+    expect(mocks.completeSimple).not.toHaveBeenCalled()
   })
 })

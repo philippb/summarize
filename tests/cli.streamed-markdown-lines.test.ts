@@ -5,36 +5,18 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['\nHello', ' world\n']),
-    totalUsage: Promise.resolve({
-      promptTokens: 100,
-      completionTokens: 50,
-      totalTokens: 150,
-    }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 const htmlResponse = (html: string, status = 200) =>
@@ -56,8 +38,16 @@ function collectChunks() {
 
 describe('cli streamed markdown write semantics', () => {
   it('buffers until newline and writes complete lines only', async () => {
-    streamTextMock.mockClear()
-    createOpenAIMock.mockClear()
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['\nHello', ' world\n'],
+        makeAssistantMessage({
+          text: '\nHello world\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-stream-lines-'))
     const cacheDir = join(root, '.summarize', 'cache')

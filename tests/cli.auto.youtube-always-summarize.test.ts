@@ -4,7 +4,23 @@ import { describe, expect, it, vi } from 'vitest'
 import { runCli } from '../src/run.js'
 
 const mocks = vi.hoisted(() => ({
-  generateText: vi.fn(async () => ({ text: 'SUMMARY' })),
+  completeSimple: vi.fn(async () => ({
+    role: 'assistant',
+    api: 'openai-responses',
+    provider: 'openai',
+    model: 'gpt-5.2',
+    stopReason: 'stop',
+    timestamp: Date.now(),
+    content: [{ type: 'text', text: 'SUMMARY' }],
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  })),
   resolveTranscriptForLink: vi.fn(async (...args: unknown[]) => {
     return typeof args[0] === 'string' && args[0].includes('youtube.com/watch')
       ? {
@@ -40,14 +56,14 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-vi.mock('ai', () => ({
-  generateText: mocks.generateText,
-}))
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: vi.fn(({ apiKey }: { apiKey: string }) => {
-    return (modelId: string) => ({ provider: 'openai', modelId, apiKey })
-  }),
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: () => {
+    throw new Error('unexpected pi-ai streamSimple call')
+  },
+  getModel: () => {
+    throw new Error('no model')
+  },
 }))
 
 vi.mock('../packages/core/src/content/transcript/index.js', () => ({
@@ -73,7 +89,7 @@ const silentStderr = new Writable({
 
 describe('--model auto (YouTube)', () => {
   it('uses an LLM and does not print the transcript', async () => {
-    mocks.generateText.mockReset().mockResolvedValue({ text: 'SUMMARY' })
+    mocks.completeSimple.mockClear()
     mocks.resolveTranscriptForLink.mockClear()
 
     const youtubeUrl = 'https://www.youtube.com/watch?v=EYSQGkpuzAA&t=69s'
@@ -98,7 +114,7 @@ describe('--model auto (YouTube)', () => {
     expect(out.getText()).toMatch(/summary/i)
     expect(out.getText()).not.toContain('Transcript:')
     expect(out.getText()).not.toContain('HELLO FROM TEST')
-    expect(mocks.generateText).toHaveBeenCalled()
+    expect(mocks.completeSimple).toHaveBeenCalled()
     expect(mocks.resolveTranscriptForLink).toHaveBeenCalled()
   })
 })

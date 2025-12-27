@@ -56,7 +56,9 @@ describe('daemon/flow-context (overrides)', () => {
 
     expect(ctx.flags.lengthArg).toEqual({ kind: 'chars', maxCharacters: 20000 })
     expect(ctx.flags.outputLanguage.kind).toBe('fixed')
-    expect(ctx.flags.outputLanguage.kind === 'fixed' ? ctx.flags.outputLanguage.tag : null).toBe('de')
+    expect(ctx.flags.outputLanguage.kind === 'fixed' ? ctx.flags.outputLanguage.tag : null).toBe(
+      'de'
+    )
   })
 
   it('adjusts desired output tokens based on length', () => {

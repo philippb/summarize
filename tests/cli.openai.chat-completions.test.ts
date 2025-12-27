@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -12,32 +13,22 @@ const htmlResponse = (html: string, status = 200) =>
     headers: { 'Content-Type': 'text/html' },
   })
 
-const generateTextMock = vi.fn(async () => ({ text: 'OK' }))
-
-vi.mock('ai', () => ({
-  generateText: generateTextMock,
+const mocks = vi.hoisted(() => ({
+  completeSimple: vi.fn(),
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  const responsesModel = (_modelId: string) => ({ kind: 'responses' })
-  const chatModel = (_modelId: string) => ({ kind: 'chat' })
-  return Object.assign(responsesModel, { chat: chatModel })
-})
+mocks.completeSimple.mockImplementation(async (model: any) =>
+  makeAssistantMessage({ text: 'OK', provider: model.provider, model: model.id, api: model.api })
+)
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
-}))
-
-vi.mock('@ai-sdk/google', () => ({
-  createGoogleGenerativeAI: () => (_modelId: string) => ({}),
-}))
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: () => (_modelId: string) => ({}),
-}))
-
-vi.mock('@ai-sdk/anthropic', () => ({
-  createAnthropic: () => (_modelId: string) => ({}),
+vi.mock('@mariozechner/pi-ai', () => ({
+  completeSimple: mocks.completeSimple,
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 const silentStderr = new Writable({
@@ -59,8 +50,7 @@ const collectStdout = () => {
 
 describe('OpenAI chat completions toggle', () => {
   it('forces chat completions via OPENAI_USE_CHAT_COMPLETIONS', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -80,13 +70,12 @@ describe('OpenAI chat completions toggle', () => {
       stderr: silentStderr,
     })
 
-    const args = generateTextMock.mock.calls[0]?.[0] as { model?: { kind?: string } }
-    expect(args.model?.kind).toBe('chat')
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { api?: string }
+    expect(model.api).toBe('openai-completions')
   })
 
   it('forces chat completions via config', async () => {
-    generateTextMock.mockReset().mockResolvedValue({ text: 'OK' })
-    createOpenAIMock.mockClear()
+    mocks.completeSimple.mockClear()
 
     const html =
       '<!doctype html><html><head><title>Hello</title></head>' +
@@ -115,7 +104,7 @@ describe('OpenAI chat completions toggle', () => {
       stderr: silentStderr,
     })
 
-    const args = generateTextMock.mock.calls[0]?.[0] as { model?: { kind?: string } }
-    expect(args.model?.kind).toBe('chat')
+    const model = mocks.completeSimple.mock.calls[0]?.[0] as { api?: string }
+    expect(model.api).toBe('openai-completions')
   })
 })

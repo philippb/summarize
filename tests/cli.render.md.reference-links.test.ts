@@ -5,6 +5,7 @@ import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 const htmlResponse = (html: string, status = 200) =>
   new Response(html, {
@@ -23,42 +24,31 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream([
-      'Here is a link: [Example][1]\n\n',
-      '[1]: https://example.com\n',
-    ]),
-    totalUsage: Promise.resolve({
-      promptTokens: 100,
-      completionTokens: 50,
-      totalTokens: 150,
-    }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  getModel: mocks.getModel,
 }))
 
 describe('cli markdown reference links', () => {
   it('streams without re-rendering earlier lines when reference definitions arrive', async () => {
+    mocks.streamSimple.mockImplementation(() =>
+      makeTextDeltaStream(
+        ['Here is a link: [Example][1]\n\n', '[1]: https://example.com\n'],
+        makeAssistantMessage({
+          text: 'Here is a link: [Example][1]\n\n[1]: https://example.com\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
+    mocks.streamSimple.mockClear()
+
     const root = mkdtempSync(join(tmpdir(), 'summarize-md-links-'))
     const cacheDir = join(root, '.summarize', 'cache')
     mkdirSync(cacheDir, { recursive: true })
@@ -114,16 +104,15 @@ describe('cli markdown reference links', () => {
   })
 
   it('materializes inline Markdown links so URLs remain clickable', async () => {
-    streamTextMock.mockImplementationOnce(() => {
-      return {
-        textStream: createTextStream(['Inline link: [Example](https://inline.example.com)\n']),
-        totalUsage: Promise.resolve({
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        }),
-      }
-    })
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(
+        ['Inline link: [Example](https://inline.example.com)\n'],
+        makeAssistantMessage({
+          text: 'Inline link: [Example](https://inline.example.com)\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-md-links-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -178,21 +167,20 @@ describe('cli markdown reference links', () => {
   })
 
   it('does not rewrite links inside fenced code blocks', async () => {
-    streamTextMock.mockImplementationOnce(() => {
-      return {
-        textStream: createTextStream([
+    mocks.streamSimple.mockImplementationOnce(() =>
+      makeTextDeltaStream(
+        [
           'Outside: [Example](https://outside.example.com)\n\n',
           '```txt\n',
           'Inside: [Nope](https://inside.example.com)\n',
           '```\n',
-        ]),
-        totalUsage: Promise.resolve({
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-        }),
-      }
-    })
+        ],
+        makeAssistantMessage({
+          text: 'Outside: [Example](https://outside.example.com)\n\n```txt\nInside: [Nope](https://inside.example.com)\n```\n',
+          usage: { input: 100, output: 50, totalTokens: 150 },
+        })
+      )
+    )
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-md-links-'))
     const cacheDir = join(root, '.summarize', 'cache')

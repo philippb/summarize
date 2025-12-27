@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-
+import type { ExecFileFn } from '../src/markitdown.js'
 import { runCli } from '../src/run.js'
+import { makeAssistantMessage, makeTextDeltaStream } from './helpers/pi-ai-mock.js'
 
 function collectStream() {
   let text = ''
@@ -17,48 +18,37 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-function createTextStream(chunks: string[]): AsyncIterable<string> {
-  return {
-    async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
-    },
-  }
-}
-
-const streamTextMock = vi.fn(() => {
-  return {
-    textStream: createTextStream(['OK']),
-    totalUsage: Promise.resolve({
-      promptTokens: 10,
-      completionTokens: 2,
-      totalTokens: 12,
-    }),
-  }
-})
-
-vi.mock('ai', () => ({
-  streamText: streamTextMock,
+const mocks = vi.hoisted(() => ({
+  streamSimple: vi.fn(),
+  completeSimple: vi.fn(),
+  getModel: vi.fn(() => {
+    throw new Error('no model')
+  }),
 }))
 
-const createOpenAIMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
+mocks.streamSimple.mockImplementation(() =>
+  makeTextDeltaStream(
+    ['OK'],
+    makeAssistantMessage({ text: 'OK', usage: { input: 10, output: 2, totalTokens: 12 } })
+  )
+)
 
-vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: createOpenAIMock,
+vi.mock('@mariozechner/pi-ai', () => ({
+  streamSimple: mocks.streamSimple,
+  completeSimple: mocks.completeSimple,
+  getModel: mocks.getModel,
 }))
 
-const createXaiMock = vi.fn(() => {
-  return (_modelId: string) => ({})
-})
-
-vi.mock('@ai-sdk/xai', () => ({
-  createXai: createXaiMock,
-}))
+const execFileMock: ExecFileFn = ((file, args, _options, callback) => {
+  void file
+  void args
+  callback(null, '# converted\n\nhello\n', '')
+  return { pid: 123 } as any
+}) as ExecFileFn
 
 describe('cli asset inputs (local file)', () => {
-  it('attaches a local PDF to the model with a detected media type', async () => {
-    streamTextMock.mockClear()
+  it('preprocesses a local PDF to Markdown and inlines it into the prompt', async () => {
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -90,32 +80,31 @@ describe('cli asset inputs (local file)', () => {
     await runCli(
       ['--model', 'openai/gpt-5.2', '--timeout', '2s', '--stream', 'on', '--plain', pdfPath],
       {
-        env: { HOME: root, OPENAI_API_KEY: 'test' },
+        env: { HOME: root, OPENAI_API_KEY: 'test', UVX_PATH: 'uvx' },
         fetch: vi.fn(async () => {
           throw new Error('unexpected fetch')
         }) as unknown as typeof fetch,
+        execFile: execFileMock,
         stdout: stdout.stream,
         stderr: stderr.stream,
       }
     )
 
     expect(stdout.getText()).toContain('OK')
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-    const call = streamTextMock.mock.calls[0]?.[0] as { messages?: unknown }
-    expect(Array.isArray(call.messages)).toBe(true)
-    const messages = call.messages as Array<{ role: string; content: unknown }>
-    expect(messages[0]?.role).toBe('user')
-    expect(Array.isArray(messages[0]?.content)).toBe(true)
-    const parts = messages[0].content as Array<Record<string, unknown>>
-    const filePart = parts.find((p) => p.type === 'file') ?? parts.find((p) => p.type === 'image')
-    expect(filePart).toBeTruthy()
-    expect(filePart?.mediaType).toBe('application/pdf')
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ role: string; content: unknown }>
+    }
+    const content = String(context.messages?.[0]?.content ?? '')
+    expect(content).toContain('Original media type: application/pdf')
+    expect(content).toContain('Provided as: text/markdown')
+    expect(content).toContain('# converted')
 
     globalFetchSpy.mockRestore()
   })
 
   it('inlines text files into the prompt instead of attaching a file part', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-txt-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -157,18 +146,17 @@ describe('cli asset inputs (local file)', () => {
     )
 
     expect(stdout.getText()).toContain('OK')
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-
-    const call = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
-    expect(typeof call.prompt).toBe('string')
-    expect(String(call.prompt)).toContain('Hello from text file.')
-    expect(call.messages).toBeUndefined()
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ role: string; content: unknown }>
+    }
+    expect(String(context.messages?.[0]?.content ?? '')).toContain('Hello from text file.')
 
     globalFetchSpy.mockRestore()
   })
 
   it('allows xAI models to summarize local text files (inlined prompt)', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-txt-xai-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -222,18 +210,17 @@ describe('cli asset inputs (local file)', () => {
     )
 
     expect(stdout.getText()).toContain('OK')
-    expect(streamTextMock).toHaveBeenCalledTimes(1)
-
-    const call = streamTextMock.mock.calls[0]?.[0] as { prompt?: unknown; messages?: unknown }
-    expect(typeof call.prompt).toBe('string')
-    expect(String(call.prompt)).toContain('Hello from xAI text file.')
-    expect(call.messages).toBeUndefined()
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(1)
+    const context = mocks.streamSimple.mock.calls[0]?.[1] as {
+      messages?: Array<{ role: string; content: unknown }>
+    }
+    expect(String(context.messages?.[0]?.content ?? '')).toContain('Hello from xAI text file.')
 
     globalFetchSpy.mockRestore()
   })
 
   it('rejects local text files that exceed the input token limit', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-token-limit-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -279,13 +266,13 @@ describe('cli asset inputs (local file)', () => {
         }
       )
     ).rejects.toThrow(/Input token count/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
 
     globalFetchSpy.mockRestore()
   })
 
   it('rejects local text files above the 10 MB limit before tokenizing', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-size-limit-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -326,13 +313,13 @@ describe('cli asset inputs (local file)', () => {
 
     await expect(run()).rejects.toThrow(/Text file too large/i)
     await expect(run()).rejects.toThrow(/10 MB/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
 
     globalFetchSpy.mockRestore()
   })
 
   it('errors early for zip archives with a helpful message', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-zip-'))
     const zipPath = join(root, 'JetBrainsMono-2.304.zip')
@@ -352,11 +339,11 @@ describe('cli asset inputs (local file)', () => {
     await expect(run()).rejects.toThrow(/Unsupported file type/i)
     await expect(run()).rejects.toThrow(/application\/zip/i)
     await expect(run()).rejects.toThrow(/unzip/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 
   it('errors when a text file exceeds the size limit', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-large-'))
     const txtPath = join(root, 'large.txt')
@@ -375,11 +362,11 @@ describe('cli asset inputs (local file)', () => {
 
     await expect(run()).rejects.toThrow(/Text file too large/i)
     await expect(run()).rejects.toThrow(/Limit is 10 MB/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 
   it('errors when a text file exceeds the model input token limit', async () => {
-    streamTextMock.mockClear()
+    mocks.streamSimple.mockClear()
 
     const root = mkdtempSync(join(tmpdir(), 'summarize-asset-local-tokens-'))
     const cacheDir = join(root, '.summarize', 'cache')
@@ -421,7 +408,7 @@ describe('cli asset inputs (local file)', () => {
 
     await expect(run()).rejects.toThrow(/token count/i)
     await expect(run()).rejects.toThrow(/input limit/i)
-    expect(streamTextMock).toHaveBeenCalledTimes(0)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
 
     globalFetchSpy.mockRestore()
   })

@@ -24,7 +24,6 @@ import type { SummaryLength } from '../../../shared/contracts.js'
 import {
   type AssetAttachment,
   ensureCliAttachmentPath,
-  isTextLikeMediaType,
   isUnsupportedAttachmentError,
 } from '../../attachments.js'
 import { parseCliUserModelId } from '../../env.js'
@@ -151,6 +150,22 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
         : ('file' as const)
   const requiresVideoUnderstanding = kind === 'video' && ctx.videoMode !== 'transcript'
 
+  if (
+    ctx.requestedModel.kind === 'auto' &&
+    !ctx.isNamedModelSelection &&
+    !ctx.json &&
+    typeof ctx.maxOutputTokensArg === 'number' &&
+    textContent &&
+    countTokens(textContent.content) <= ctx.maxOutputTokensArg
+  ) {
+    ctx.clearProgressForStdout()
+    ctx.stdout.write(`${textContent.content.trim()}\n`)
+    if (assetFooterParts.length > 0) {
+      ctx.writeViaFooter([...assetFooterParts, 'no model'])
+    }
+    return
+  }
+
   const attempts: ModelAttempt[] = await (async () => {
     if (ctx.isFallbackModel) {
       const catalog = await ctx.getLiteLlmCatalog()
@@ -171,20 +186,7 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
         const parsed = parseCliUserModelId(attempt.userModelId)
         return { ...attempt, cliProvider: parsed.provider, cliModel: parsed.model }
       })
-      const filtered = mapped.filter((a) => {
-        if (a.transport === 'cli') return true
-        if (!a.llmModelId) return false
-        const parsed = parseGatewayStyleModelId(a.llmModelId)
-        if (
-          parsed.provider === 'xai' &&
-          args.attachment.part.type === 'file' &&
-          !isTextLikeMediaType(args.attachment.mediaType)
-        ) {
-          return false
-        }
-        return true
-      })
-      return filtered
+      return mapped
     }
     /* v8 ignore next */
     if (!ctx.fixedModelSpec) {
@@ -228,8 +230,7 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
   const cliContext = await (async () => {
     if (!attempts.some((a) => a.transport === 'cli')) return null
     if (typeof promptPayload === 'string') return null
-    const needsPathPrompt =
-      args.attachment.part.type === 'image' || args.attachment.part.type === 'file'
+    const needsPathPrompt = args.attachment.kind === 'image' || args.attachment.kind === 'file'
     if (!needsPathPrompt) return null
     const filePath = await ensureCliAttachmentPath({
       sourceKind: args.sourceKind,
@@ -239,11 +240,11 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
     const dir = path.dirname(filePath)
     const extraArgsByProvider: Partial<Record<CliProvider, string[]>> = {
       gemini: ['--include-directories', dir],
-      codex: args.attachment.part.type === 'image' ? ['-i', filePath] : undefined,
+      codex: args.attachment.kind === 'image' ? ['-i', filePath] : undefined,
     }
     return {
       promptOverride: buildPathSummaryPrompt({
-        kindLabel: args.attachment.part.type === 'image' ? 'image' : 'file',
+        kindLabel: args.attachment.kind === 'image' ? 'image' : 'file',
         filePath,
         filename: args.attachment.filename,
         mediaType: args.attachment.mediaType,

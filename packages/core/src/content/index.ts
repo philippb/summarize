@@ -1,3 +1,8 @@
+export type {
+  TranscriptCache,
+  TranscriptCacheGetResult,
+  TranscriptCacheSetArgs,
+} from './cache/types.js'
 export {
   createLinkPreviewClient,
   type LinkPreviewClient,
@@ -19,11 +24,6 @@ export type {
   ScrapeWithFirecrawl,
 } from './link-preview/deps.js'
 export { ProgressKind } from './link-preview/deps.js'
-export type {
-  TranscriptCache,
-  TranscriptCacheGetResult,
-  TranscriptCacheSetArgs,
-} from './cache/types.js'
 export {
   CACHE_MODES,
   type CacheMode,

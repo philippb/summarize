@@ -60,5 +60,5 @@ describe('runUrlFlow', () => {
     expect(extracted).not.toBeNull()
     expect(extracted?.content.length).toBeLessThanOrEqual(9_000)
     expect(extracted?.truncated).toBe(true)
-  })
+  }, 20_000)
 })

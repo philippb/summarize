@@ -1,5 +1,14 @@
-import type { ModelMessage } from 'ai'
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  KnownProvider,
+  Message,
+  Model,
+} from '@mariozechner/pi-ai'
+import { completeSimple, getModel, streamSimple } from '@mariozechner/pi-ai'
 import { parseGatewayStyleModelId } from './model-id.js'
+import type { PromptPayload } from './prompt.js'
 
 export type LlmApiKeys = {
   xaiApiKey: string | null
@@ -19,11 +28,6 @@ export type LlmTokenUsage = {
   totalTokens: number | null
 }
 
-function assertNonEmptyText(text: string, modelId: string): void {
-  if (text.trim().length > 0) return
-  throw new Error(`LLM returned an empty summary (model ${modelId}).`)
-}
-
 type RetryNotice = {
   attempt: number
   maxRetries: number
@@ -34,7 +38,6 @@ type RetryNotice = {
 type OpenAiClientConfig = {
   apiKey: string
   baseURL?: string
-  fetch: typeof fetch
   useChatCompletions: boolean
   isOpenRouter: boolean
 }
@@ -86,40 +89,28 @@ function normalizeAnthropicModelAccessError(error: unknown, modelId: string): Er
 
 function normalizeTokenUsage(raw: unknown): LlmTokenUsage | null {
   if (!raw || typeof raw !== 'object') return null
-  const usage = raw as Record<string, unknown>
+  const usage = raw as { input?: unknown; output?: unknown; totalTokens?: unknown }
 
   const promptTokens =
-    typeof usage.promptTokens === 'number' && Number.isFinite(usage.promptTokens)
-      ? usage.promptTokens
-      : typeof usage.inputTokens === 'number' && Number.isFinite(usage.inputTokens)
-        ? usage.inputTokens
-        : null
+    typeof usage.input === 'number' && Number.isFinite(usage.input) ? usage.input : null
   const completionTokens =
-    typeof usage.completionTokens === 'number' && Number.isFinite(usage.completionTokens)
-      ? usage.completionTokens
-      : typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens)
-        ? usage.outputTokens
-        : null
+    typeof usage.output === 'number' && Number.isFinite(usage.output) ? usage.output : null
   const totalTokens =
     typeof usage.totalTokens === 'number' && Number.isFinite(usage.totalTokens)
       ? usage.totalTokens
       : null
 
-  if (promptTokens === null && completionTokens === null && totalTokens === null) {
-    return null
-  }
+  if (promptTokens === null && completionTokens === null && totalTokens === null) return null
   return { promptTokens, completionTokens, totalTokens }
 }
 
 function resolveOpenAiClientConfig({
   apiKeys,
-  fetchImpl,
   forceOpenRouter,
   openaiBaseUrlOverride,
   forceChatCompletions,
 }: {
   apiKeys: LlmApiKeys
-  fetchImpl: typeof fetch
   forceOpenRouter?: boolean
   openaiBaseUrlOverride?: string | null
   forceChatCompletions?: boolean
@@ -148,15 +139,6 @@ function resolveOpenAiClientConfig({
     )
   }
 
-  const wrappedFetch: typeof fetch = isOpenRouter
-    ? (url, init) => {
-        const headers = new Headers(init?.headers)
-        headers.set('HTTP-Referer', 'https://github.com/steipete/summarize')
-        headers.set('X-Title', 'summarize')
-        return fetchImpl(url, { ...init, headers })
-      }
-    : fetchImpl
-
   const baseURL = forceOpenRouter
     ? 'https://openrouter.ai/api/v1'
     : (baseUrl ?? (isOpenRouter ? 'https://openrouter.ai/api/v1' : undefined))
@@ -165,10 +147,168 @@ function resolveOpenAiClientConfig({
   return {
     apiKey,
     baseURL: baseURL ?? undefined,
-    fetch: wrappedFetch,
     useChatCompletions,
     isOpenRouter,
   }
+}
+
+function promptToContext({ system, prompt }: { system?: string; prompt: PromptPayload }): Context {
+  const messages: Message[] =
+    typeof prompt === 'string'
+      ? [{ role: 'user', content: prompt, timestamp: Date.now() }]
+      : prompt.map((msg) =>
+          typeof (msg as { timestamp?: unknown }).timestamp === 'number'
+            ? msg
+            : ({ ...msg, timestamp: Date.now() } as Message)
+        )
+
+  return { systemPrompt: system, messages }
+}
+
+function extractText(message: AssistantMessage): string {
+  const text = message.content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text)
+    .join('')
+  return text.trim()
+}
+
+function wantsImages(context: Context): boolean {
+  for (const msg of context.messages) {
+    if (msg.role === 'user' || msg.role === 'toolResult') {
+      if (Array.isArray(msg.content) && msg.content.some((c) => c.type === 'image')) return true
+    }
+  }
+  return false
+}
+
+function tryGetModel(provider: KnownProvider, modelId: string): Model<Api> | null {
+  try {
+    return getModel(provider, modelId as never) as unknown as Model<Api>
+  } catch {
+    return null
+  }
+}
+
+function createSyntheticModel({
+  provider,
+  modelId,
+  api,
+  baseUrl,
+  allowImages,
+  headers,
+}: {
+  provider: KnownProvider
+  modelId: string
+  api: Model<Api>['api']
+  baseUrl: string
+  allowImages: boolean
+  headers?: Record<string, string>
+}): Model<Api> {
+  return {
+    id: modelId,
+    name: `${provider}/${modelId}`,
+    api,
+    provider,
+    baseUrl,
+    reasoning: false,
+    input: allowImages ? ['text', 'image'] : ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+    ...(headers ? { headers } : {}),
+  }
+}
+
+function resolveModelForCall({
+  modelId,
+  parsedProvider,
+  openaiConfig,
+  context,
+  openaiBaseUrlOverride,
+}: {
+  modelId: string
+  parsedProvider: 'xai' | 'openai' | 'google' | 'anthropic' | 'zai'
+  openaiConfig: OpenAiClientConfig | null
+  context: Context
+  openaiBaseUrlOverride?: string | null
+}): Model<Api> {
+  const allowImages = wantsImages(context)
+
+  if (parsedProvider === 'openai') {
+    const base = tryGetModel('openai', modelId)
+    const api = openaiConfig?.useChatCompletions ? 'openai-completions' : 'openai-responses'
+    const baseUrl = openaiConfig?.baseURL ?? base?.baseUrl ?? 'https://api.openai.com/v1'
+    const headers = openaiConfig?.isOpenRouter
+      ? {
+          ...(base?.headers ?? {}),
+          'HTTP-Referer': 'https://github.com/steipete/summarize',
+          'X-Title': 'summarize',
+        }
+      : base?.headers
+    return {
+      ...(base ?? createSyntheticModel({ provider: 'openai', modelId, api, baseUrl, allowImages })),
+      api,
+      baseUrl,
+      ...(headers ? { headers } : {}),
+    }
+  }
+
+  if (parsedProvider === 'zai') {
+    const base = tryGetModel('zai', modelId)
+    const api = 'openai-completions'
+    const baseUrl =
+      openaiBaseUrlOverride ??
+      base?.baseUrl ??
+      openaiConfig?.baseURL ??
+      'https://api.z.ai/api/paas/v4'
+    return {
+      ...(base ?? createSyntheticModel({ provider: 'zai', modelId, api, baseUrl, allowImages })),
+      api,
+      baseUrl,
+      input: allowImages ? ['text', 'image'] : ['text'],
+    }
+  }
+
+  if (parsedProvider === 'xai') {
+    const base = tryGetModel('xai', modelId)
+    return (
+      base ??
+      createSyntheticModel({
+        provider: 'xai',
+        modelId,
+        api: 'openai-completions',
+        baseUrl: 'https://api.x.ai/v1',
+        allowImages,
+      })
+    )
+  }
+
+  if (parsedProvider === 'google') {
+    const base = tryGetModel('google', modelId)
+    return (
+      base ??
+      createSyntheticModel({
+        provider: 'google',
+        modelId,
+        api: 'google-generative-ai',
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        allowImages,
+      })
+    )
+  }
+
+  const base = tryGetModel('anthropic', modelId)
+  return (
+    base ??
+    createSyntheticModel({
+      provider: 'anthropic',
+      modelId,
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+      allowImages,
+    })
+  )
 }
 
 export async function generateTextWithModelId({
@@ -179,7 +319,7 @@ export async function generateTextWithModelId({
   temperature,
   maxOutputTokens,
   timeoutMs,
-  fetchImpl,
+  fetchImpl: _fetchImpl,
   forceOpenRouter,
   openaiBaseUrlOverride,
   forceChatCompletions,
@@ -189,7 +329,7 @@ export async function generateTextWithModelId({
   modelId: string
   apiKeys: LlmApiKeys
   system?: string
-  prompt: string | ModelMessage[]
+  prompt: PromptPayload
   temperature?: number
   maxOutputTokens?: number
   timeoutMs: number
@@ -205,7 +345,9 @@ export async function generateTextWithModelId({
   provider: 'xai' | 'openai' | 'google' | 'anthropic' | 'zai'
   usage: LlmTokenUsage | null
 }> {
+  void _fetchImpl
   const parsed = parseGatewayStyleModelId(modelId)
+  const context = promptToContext({ system, prompt })
 
   const maxRetries = Math.max(0, retries)
   let attempt = 0
@@ -214,29 +356,28 @@ export async function generateTextWithModelId({
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
-      const { generateText } = await import('ai')
-
-      const shouldSendMaxOutputTokens = () => typeof maxOutputTokens === 'number'
-
       if (parsed.provider === 'xai') {
         const apiKey = apiKeys.xaiApiKey
         if (!apiKey) throw new Error('Missing XAI_API_KEY for xai/... model')
-        const { createXai } = await import('@ai-sdk/xai')
-        const xai = createXai({ apiKey, fetch: fetchImpl })
-        const result = await generateText({
-          model: xai(parsed.model),
-          system,
-          ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-          ...(typeof temperature === 'number' ? { temperature } : {}),
-          ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-          abortSignal: controller.signal,
+        const model = resolveModelForCall({
+          modelId: parsed.model,
+          parsedProvider: parsed.provider,
+          openaiConfig: null,
+          context,
         })
-        assertNonEmptyText(result.text, parsed.canonical)
+        const result = await completeSimple(model, context, {
+          ...(typeof temperature === 'number' ? { temperature } : {}),
+          ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+          apiKey,
+          signal: controller.signal,
+        })
+        const text = extractText(result)
+        if (!text) throw new Error(`LLM returned an empty summary (model ${parsed.canonical}).`)
         return {
-          text: result.text,
+          text,
           canonicalModelId: parsed.canonical,
           provider: parsed.provider,
-          usage: normalizeTokenUsage((result as unknown as { usage?: unknown }).usage),
+          usage: normalizeTokenUsage(result.usage),
         }
       }
 
@@ -246,79 +387,110 @@ export async function generateTextWithModelId({
           throw new Error(
             'Missing GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY) for google/... model'
           )
-        const { createGoogleGenerativeAI } = await import('@ai-sdk/google')
-        const google = createGoogleGenerativeAI({ apiKey, fetch: fetchImpl })
-        const result = await generateText({
-          model: google(parsed.model),
-          system,
-          ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-          ...(typeof temperature === 'number' ? { temperature } : {}),
-          ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-          abortSignal: controller.signal,
+        const model = resolveModelForCall({
+          modelId: parsed.model,
+          parsedProvider: parsed.provider,
+          openaiConfig: null,
+          context,
         })
-        assertNonEmptyText(result.text, parsed.canonical)
+        const result = await completeSimple(model, context, {
+          ...(typeof temperature === 'number' ? { temperature } : {}),
+          ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+          apiKey,
+          signal: controller.signal,
+        })
+        const text = extractText(result)
+        if (!text) throw new Error(`LLM returned an empty summary (model ${parsed.canonical}).`)
         return {
-          text: result.text,
+          text,
           canonicalModelId: parsed.canonical,
           provider: parsed.provider,
-          usage: normalizeTokenUsage((result as unknown as { usage?: unknown }).usage),
+          usage: normalizeTokenUsage(result.usage),
         }
       }
 
       if (parsed.provider === 'anthropic') {
         const apiKey = apiKeys.anthropicApiKey
         if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY for anthropic/... model')
-        const { createAnthropic } = await import('@ai-sdk/anthropic')
-        const anthropic = createAnthropic({ apiKey, fetch: fetchImpl })
-        const result = await generateText({
-          model: anthropic(parsed.model),
-          system,
-          ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-          ...(typeof temperature === 'number' ? { temperature } : {}),
-          ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-          abortSignal: controller.signal,
+        const model = resolveModelForCall({
+          modelId: parsed.model,
+          parsedProvider: parsed.provider,
+          openaiConfig: null,
+          context,
         })
-        assertNonEmptyText(result.text, parsed.canonical)
+        const result = await completeSimple(model, context, {
+          ...(typeof temperature === 'number' ? { temperature } : {}),
+          ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+          apiKey,
+          signal: controller.signal,
+        })
+        const text = extractText(result)
+        if (!text) throw new Error(`LLM returned an empty summary (model ${parsed.canonical}).`)
         return {
-          text: result.text,
+          text,
           canonicalModelId: parsed.canonical,
           provider: parsed.provider,
-          usage: normalizeTokenUsage((result as unknown as { usage?: unknown }).usage),
+          usage: normalizeTokenUsage(result.usage),
         }
       }
 
-      const { createOpenAI } = await import('@ai-sdk/openai')
-      const openaiConfig = resolveOpenAiClientConfig({
-        apiKeys,
-        fetchImpl,
-        forceOpenRouter,
-        openaiBaseUrlOverride,
-        forceChatCompletions,
-      })
-      const openai = createOpenAI({
-        apiKey: openaiConfig.apiKey,
-        ...(openaiConfig.baseURL ? { baseURL: openaiConfig.baseURL } : {}),
-        fetch: openaiConfig.fetch,
+      const openaiConfig =
+        parsed.provider === 'openai'
+          ? resolveOpenAiClientConfig({
+              apiKeys,
+              forceOpenRouter,
+              openaiBaseUrlOverride,
+              forceChatCompletions,
+            })
+          : null
+
+      if (parsed.provider === 'zai') {
+        const apiKey = apiKeys.openaiApiKey
+        if (!apiKey) throw new Error('Missing Z_AI_API_KEY for zai/... model')
+        const model = resolveModelForCall({
+          modelId: parsed.model,
+          parsedProvider: parsed.provider,
+          openaiConfig: null,
+          context,
+          openaiBaseUrlOverride,
+        })
+        const result = await completeSimple(model, context, {
+          ...(typeof temperature === 'number' ? { temperature } : {}),
+          ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+          apiKey,
+          signal: controller.signal,
+        })
+        const text = extractText(result)
+        if (!text) throw new Error(`LLM returned an empty summary (model ${parsed.canonical}).`)
+        return {
+          text,
+          canonicalModelId: parsed.canonical,
+          provider: parsed.provider,
+          usage: normalizeTokenUsage(result.usage),
+        }
+      }
+
+      const model = resolveModelForCall({
+        modelId: parsed.model,
+        parsedProvider: parsed.provider,
+        openaiConfig,
+        context,
       })
 
-      // OpenRouter requires chat completions endpoint
-      const useChatCompletions = openaiConfig.useChatCompletions
-      const responsesModelId = parsed.model as unknown as Parameters<typeof openai>[0]
-      const chatModelId = parsed.model as unknown as Parameters<typeof openai.chat>[0]
-      const result = await generateText({
-        model: useChatCompletions ? openai.chat(chatModelId) : openai(responsesModelId),
-        system,
-        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
+      const result = await completeSimple(model, context, {
         ...(typeof temperature === 'number' ? { temperature } : {}),
-        ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-        abortSignal: controller.signal,
+        ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+        apiKey: openaiConfig?.apiKey ?? apiKeys.openaiApiKey ?? undefined,
+        signal: controller.signal,
       })
-      assertNonEmptyText(result.text, parsed.canonical)
+
+      const text = extractText(result)
+      if (!text) throw new Error(`LLM returned an empty summary (model ${parsed.canonical}).`)
       return {
-        text: result.text,
+        text,
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: normalizeTokenUsage((result as unknown as { usage?: unknown }).usage),
+        usage: normalizeTokenUsage(result.usage),
       }
     } catch (error) {
       const normalizedError =
@@ -376,7 +548,7 @@ export async function streamTextWithModelId({
   temperature,
   maxOutputTokens,
   timeoutMs,
-  fetchImpl,
+  fetchImpl: _fetchImpl,
   forceOpenRouter,
   openaiBaseUrlOverride,
   forceChatCompletions,
@@ -384,7 +556,7 @@ export async function streamTextWithModelId({
   modelId: string
   apiKeys: LlmApiKeys
   system?: string
-  prompt: string | ModelMessage[]
+  prompt: PromptPayload
   temperature?: number
   maxOutputTokens?: number
   timeoutMs: number
@@ -399,7 +571,9 @@ export async function streamTextWithModelId({
   usage: Promise<LlmTokenUsage | null>
   lastError: () => unknown
 }> {
+  void _fetchImpl
   const parsed = parseGatewayStyleModelId(modelId)
+  const context = promptToContext({ system, prompt })
 
   const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -471,37 +645,40 @@ export async function streamTextWithModelId({
   })
 
   try {
-    const { streamText } = await import('ai')
-    const onError = ({ error }: { error: unknown }) => {
-      if (parsed.provider === 'anthropic') {
-        lastError = normalizeAnthropicModelAccessError(error, parsed.model) ?? error
-        return
-      }
-      lastError = error
-    }
-
-    const shouldSendMaxOutputTokens = () => typeof maxOutputTokens === 'number'
-
     if (parsed.provider === 'xai') {
       const apiKey = apiKeys.xaiApiKey
       if (!apiKey) throw new Error('Missing XAI_API_KEY for xai/... model')
-      const { createXai } = await import('@ai-sdk/xai')
-      const xai = createXai({ apiKey, fetch: fetchImpl })
-      const result = streamText({
-        model: xai(parsed.model),
-        system,
-        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-        ...(typeof temperature === 'number' ? { temperature } : {}),
-        ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-        abortSignal: controller.signal,
-        onError,
+      const model = resolveModelForCall({
+        modelId: parsed.model,
+        parsedProvider: parsed.provider,
+        openaiConfig: null,
+        context,
       })
+      const stream = streamSimple(model, context, {
+        ...(typeof temperature === 'number' ? { temperature } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+        apiKey,
+        signal: controller.signal,
+      })
+
+      const textStream: AsyncIterable<string> = {
+        async *[Symbol.asyncIterator]() {
+          for await (const event of stream) {
+            if (event.type === 'text_delta') yield event.delta
+            if (event.type === 'error') {
+              lastError = event.error
+              break
+            }
+          }
+        },
+      }
       return {
-        textStream: wrapTextStream(result.textStream),
+        textStream: wrapTextStream(textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: Promise.resolve(result.totalUsage)
-          .then((raw) => normalizeTokenUsage(raw))
+        usage: stream
+          .result()
+          .then((msg) => normalizeTokenUsage(msg.usage))
           .catch(() => null),
         lastError: () => lastError,
       }
@@ -513,23 +690,37 @@ export async function streamTextWithModelId({
         throw new Error(
           'Missing GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY) for google/... model'
         )
-      const { createGoogleGenerativeAI } = await import('@ai-sdk/google')
-      const google = createGoogleGenerativeAI({ apiKey, fetch: fetchImpl })
-      const result = streamText({
-        model: google(parsed.model),
-        system,
-        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-        ...(typeof temperature === 'number' ? { temperature } : {}),
-        ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-        abortSignal: controller.signal,
-        onError,
+      const model = resolveModelForCall({
+        modelId: parsed.model,
+        parsedProvider: parsed.provider,
+        openaiConfig: null,
+        context,
       })
+      const stream = streamSimple(model, context, {
+        ...(typeof temperature === 'number' ? { temperature } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+        apiKey,
+        signal: controller.signal,
+      })
+
+      const textStream: AsyncIterable<string> = {
+        async *[Symbol.asyncIterator]() {
+          for await (const event of stream) {
+            if (event.type === 'text_delta') yield event.delta
+            if (event.type === 'error') {
+              lastError = event.error
+              break
+            }
+          }
+        },
+      }
       return {
-        textStream: wrapTextStream(result.textStream),
+        textStream: wrapTextStream(textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: Promise.resolve(result.totalUsage)
-          .then((raw) => normalizeTokenUsage(raw))
+        usage: stream
+          .result()
+          .then((msg) => normalizeTokenUsage(msg.usage))
           .catch(() => null),
         lastError: () => lastError,
       }
@@ -538,61 +729,119 @@ export async function streamTextWithModelId({
     if (parsed.provider === 'anthropic') {
       const apiKey = apiKeys.anthropicApiKey
       if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY for anthropic/... model')
-      const { createAnthropic } = await import('@ai-sdk/anthropic')
-      const anthropic = createAnthropic({ apiKey, fetch: fetchImpl })
-      const result = streamText({
-        model: anthropic(parsed.model),
-        system,
-        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-        ...(typeof temperature === 'number' ? { temperature } : {}),
-        ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-        abortSignal: controller.signal,
-        onError,
+      const model = resolveModelForCall({
+        modelId: parsed.model,
+        parsedProvider: parsed.provider,
+        openaiConfig: null,
+        context,
       })
+      const stream = streamSimple(model, context, {
+        ...(typeof temperature === 'number' ? { temperature } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+        apiKey,
+        signal: controller.signal,
+      })
+
+      const textStream: AsyncIterable<string> = {
+        async *[Symbol.asyncIterator]() {
+          for await (const event of stream) {
+            if (event.type === 'text_delta') yield event.delta
+            if (event.type === 'error') {
+              lastError =
+                normalizeAnthropicModelAccessError(event.error, parsed.model) ?? event.error
+              break
+            }
+          }
+        },
+      }
       return {
-        textStream: wrapTextStream(result.textStream),
+        textStream: wrapTextStream(textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
-        usage: Promise.resolve(result.totalUsage)
-          .then((raw) => normalizeTokenUsage(raw))
+        usage: stream
+          .result()
+          .then((msg) => normalizeTokenUsage(msg.usage))
           .catch(() => null),
         lastError: () => lastError,
       }
     }
 
-    const { createOpenAI } = await import('@ai-sdk/openai')
+    if (parsed.provider === 'zai') {
+      const apiKey = apiKeys.openaiApiKey
+      if (!apiKey) throw new Error('Missing Z_AI_API_KEY for zai/... model')
+      const model = resolveModelForCall({
+        modelId: parsed.model,
+        parsedProvider: parsed.provider,
+        openaiConfig: null,
+        context,
+        openaiBaseUrlOverride,
+      })
+      const stream = streamSimple(model, context, {
+        ...(typeof temperature === 'number' ? { temperature } : {}),
+        ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
+        apiKey,
+        signal: controller.signal,
+      })
+      const textStream: AsyncIterable<string> = {
+        async *[Symbol.asyncIterator]() {
+          for await (const event of stream) {
+            if (event.type === 'text_delta') yield event.delta
+            if (event.type === 'error') {
+              lastError = event.error
+              break
+            }
+          }
+        },
+      }
+      return {
+        textStream: wrapTextStream(textStream),
+        canonicalModelId: parsed.canonical,
+        provider: parsed.provider,
+        usage: stream
+          .result()
+          .then((msg) => normalizeTokenUsage(msg.usage))
+          .catch(() => null),
+        lastError: () => lastError,
+      }
+    }
+
     const openaiConfig = resolveOpenAiClientConfig({
       apiKeys,
-      fetchImpl,
       forceOpenRouter,
       openaiBaseUrlOverride,
       forceChatCompletions,
     })
-    const openai = createOpenAI({
+    const model = resolveModelForCall({
+      modelId: parsed.model,
+      parsedProvider: parsed.provider,
+      openaiConfig,
+      context,
+    })
+    const stream = streamSimple(model, context, {
+      ...(typeof temperature === 'number' ? { temperature } : {}),
+      ...(typeof maxOutputTokens === 'number' ? { maxTokens: maxOutputTokens } : {}),
       apiKey: openaiConfig.apiKey,
-      ...(openaiConfig.baseURL ? { baseURL: openaiConfig.baseURL } : {}),
-      fetch: openaiConfig.fetch,
+      signal: controller.signal,
     })
 
-    // OpenRouter requires chat completions endpoint
-    const useChatCompletions = openaiConfig.useChatCompletions
-    const responsesModelId = parsed.model as unknown as Parameters<typeof openai>[0]
-    const chatModelId = parsed.model as unknown as Parameters<typeof openai.chat>[0]
-    const result = streamText({
-      model: useChatCompletions ? openai.chat(chatModelId) : openai(responsesModelId),
-      system,
-      ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
-      ...(typeof temperature === 'number' ? { temperature } : {}),
-      ...(shouldSendMaxOutputTokens() ? { maxOutputTokens } : {}),
-      abortSignal: controller.signal,
-      onError,
-    })
+    const textStream: AsyncIterable<string> = {
+      async *[Symbol.asyncIterator]() {
+        for await (const event of stream) {
+          if (event.type === 'text_delta') yield event.delta
+          if (event.type === 'error') {
+            lastError = event.error
+            break
+          }
+        }
+      },
+    }
     return {
-      textStream: wrapTextStream(result.textStream),
+      textStream: wrapTextStream(textStream),
       canonicalModelId: parsed.canonical,
       provider: parsed.provider,
-      usage: Promise.resolve(result.totalUsage)
-        .then((raw) => normalizeTokenUsage(raw))
+      usage: stream
+        .result()
+        .then((msg) => normalizeTokenUsage(msg.usage))
         .catch(() => null),
       lastError: () => lastError,
     }

@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-
-import type { FilePart, ImagePart, ModelMessage } from 'ai'
+import type { Message } from '@mariozechner/pi-ai'
 import { fileTypeFromBuffer } from 'file-type'
 import mime from 'mime'
+
+import { userTextAndImageMessage } from '../llm/prompt.js'
 
 export type InputTarget = { kind: 'url'; url: string } | { kind: 'file'; filePath: string }
 
@@ -13,7 +14,8 @@ export type UrlKind = { kind: 'website' } | { kind: 'asset' }
 export type AssetAttachment = {
   mediaType: string
   filename: string | null
-  part: ImagePart | FilePart
+  kind: 'image' | 'file'
+  bytes: Uint8Array
 }
 
 const MAX_ASSET_BYTES_DEFAULT = 50 * 1024 * 1024
@@ -192,21 +194,10 @@ function buildAttachment({
   filename: string | null
 }): AssetAttachment {
   if (mediaType.startsWith('image/')) {
-    const part: ImagePart = {
-      type: 'image',
-      image: bytes,
-      mediaType,
-    }
-    return { mediaType, filename, part }
+    return { mediaType, filename, kind: 'image', bytes }
   }
 
-  const part: FilePart = {
-    type: 'file',
-    data: bytes,
-    filename: filename ?? undefined,
-    mediaType,
-  }
-  return { mediaType, filename, part }
+  return { mediaType, filename, kind: 'file', bytes }
 }
 
 export async function loadLocalAsset({
@@ -292,11 +283,18 @@ export function buildAssetPromptMessages({
 }: {
   promptText: string
   attachment: AssetAttachment
-}): Array<ModelMessage> {
+}): Array<Message> {
+  if (attachment.kind !== 'image') {
+    throw new Error(
+      `Internal error: tried to build model messages for non-image attachment (${attachment.mediaType}).`
+    )
+  }
+
   return [
-    {
-      role: 'user',
-      content: [{ type: 'text', text: promptText }, attachment.part],
-    },
+    userTextAndImageMessage({
+      text: promptText,
+      imageBytes: attachment.bytes,
+      mimeType: attachment.mediaType,
+    }),
   ]
 }
