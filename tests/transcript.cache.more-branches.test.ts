@@ -9,6 +9,19 @@ import {
 } from '../packages/core/src/content/transcript/cache.js'
 
 describe('transcript cache - more branches', () => {
+  it('reports bypass diagnostics even without a cache', async () => {
+    const outcome = await readTranscriptCache({
+      url: 'u',
+      cacheMode: 'bypass',
+      transcriptCache: null,
+    })
+
+    expect(outcome.cached).toBeNull()
+    expect(outcome.resolution).toBeNull()
+    expect(outcome.diagnostics.cacheStatus).toBe('bypassed')
+    expect(outcome.diagnostics.notes).toContain('Cache bypass requested')
+  })
+
   it('reads cache miss / bypass / expired / hit', async () => {
     const miss = await readTranscriptCache({
       url: 'u',
@@ -80,6 +93,27 @@ describe('transcript cache - more branches', () => {
     })
     expect(empty.diagnostics.textProvided).toBe(false)
     expect(empty.resolution?.source).toBe('unknown')
+  })
+
+  it('propagates cached metadata + attempted providers on hit', async () => {
+    const cache: TranscriptCache = {
+      get: vi.fn(async () => ({
+        content: 'cached transcript',
+        source: 'podcastTranscript',
+        expired: false,
+        metadata: { episode: 12 },
+      })),
+      set: vi.fn(async () => {}),
+    }
+
+    const hit = await readTranscriptCache({
+      url: 'u',
+      cacheMode: 'default',
+      transcriptCache: cache,
+    })
+
+    expect(hit.resolution?.metadata).toEqual({ episode: 12 })
+    expect(hit.diagnostics.attemptedProviders).toEqual(['podcastTranscript'])
   })
 
   it('maps cached sources, including unknown values', () => {
