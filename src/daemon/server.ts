@@ -8,6 +8,16 @@ import { streamSummaryForVisiblePage } from './summarize.js'
 type SessionEvent =
   | { event: 'meta'; data: { model: string } }
   | { event: 'chunk'; data: { text: string } }
+  | {
+      event: 'metrics'
+      data: {
+        elapsedMs: number
+        summary: string
+        details: string | null
+        summaryDetailed: string
+        detailsDetailed: string | null
+      }
+    }
   | { event: 'done'; data: Record<string, never> }
   | { event: 'error'; data: { message: string } }
 
@@ -217,7 +227,7 @@ export async function runDaemonServer({
                 pushToSession(session, { event: 'meta', data: { model: modelId } })
               },
             }
-            await streamSummaryForVisiblePage({
+            const result = await streamSummaryForVisiblePage({
               env,
               fetchImpl,
               modelOverride:
@@ -225,6 +235,13 @@ export async function runDaemonServer({
               input: { url: pageUrl, title, text: textContent, truncated },
               sink,
             })
+
+            if (!session.lastModel) {
+              session.lastModel = result.usedModel
+              pushToSession(session, { event: 'meta', data: { model: result.usedModel } })
+            }
+
+            pushToSession(session, { event: 'metrics', data: result.metrics })
             pushToSession(session, { event: 'done', data: {} })
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)

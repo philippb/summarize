@@ -8,6 +8,7 @@ import { buildAutoModelAttempts } from '../model-auto.js'
 import type { FixedModelSpec } from '../model-spec.js'
 import { buildLinkSummaryPrompt } from '../prompts/index.js'
 import { parseCliUserModelId } from '../run/env.js'
+import { buildFinishLineText } from '../run/finish-line.js'
 import { runModelAttempts } from '../run/model-attempts.js'
 import { resolveConfigState } from '../run/run-config.js'
 import { resolveEnvState } from '../run/run-env.js'
@@ -27,6 +28,14 @@ export type VisiblePageInput = {
 export type StreamSink = {
   writeChunk: (text: string) => void
   onModelChosen: (modelId: string) => void
+}
+
+export type VisiblePageMetrics = {
+  elapsedMs: number
+  summary: string
+  details: string | null
+  summaryDetailed: string
+  detailsDetailed: string | null
 }
 
 function guessSiteName(url: string): string | null {
@@ -63,8 +72,9 @@ export async function streamSummaryForVisiblePage({
   input: VisiblePageInput
   modelOverride: string | null
   sink: StreamSink
-}): Promise<{ usedModel: string }> {
+}): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
   const envForRun = env
+  const startedAt = Date.now()
 
   const {
     config,
@@ -268,5 +278,38 @@ export async function streamSummaryForVisiblePage({
         ? parseGatewayStyleModelId(usedAttempt.llmModelId).canonical
         : requestedModelLabel
 
-  return { usedModel: canonicalUsedModel }
+  const report = await metrics.buildReport()
+  const costUsd = await metrics.estimateCostUsd()
+  const elapsedMs = Date.now() - startedAt
+
+  const label = guessSiteName(input.url)
+  const compact = buildFinishLineText({
+    elapsedMs,
+    label,
+    model: canonicalUsedModel,
+    report,
+    costUsd,
+    detailed: false,
+    extraParts: null,
+  })
+  const extended = buildFinishLineText({
+    elapsedMs,
+    label,
+    model: canonicalUsedModel,
+    report,
+    costUsd,
+    detailed: true,
+    extraParts: null,
+  })
+
+  return {
+    usedModel: canonicalUsedModel,
+    metrics: {
+      elapsedMs,
+      summary: compact.line,
+      details: compact.details,
+      summaryDetailed: extended.line,
+      detailsDetailed: extended.details,
+    },
+  }
 }

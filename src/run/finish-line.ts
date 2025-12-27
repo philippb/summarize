@@ -2,6 +2,11 @@ import { formatCompactCount, formatDurationSecondsSmart, formatElapsedMs } from 
 import { formatUSD, sumNumbersOrNull } from './format.js'
 import { ansi } from './terminal.js'
 
+export type FinishLineText = {
+  line: string
+  details: string | null
+}
+
 export type ExtractDiagnosticsForFinishLine = {
   strategy: 'bird' | 'firecrawl' | 'html' | 'nitter'
   firecrawl: { used: boolean }
@@ -186,6 +191,48 @@ export function writeFinishLine({
   extraParts?: string[] | null
   color: boolean
 }): void {
+  const text = buildFinishLineText({
+    elapsedMs,
+    label,
+    model,
+    report,
+    costUsd,
+    detailed,
+    extraParts,
+  })
+
+  stderr.write('\n')
+  stderr.write(`${ansi('1;32', text.line, color)}\n`)
+  if (detailed && text.details) {
+    stderr.write(`${ansi('0;90', text.details, color)}\n`)
+  }
+}
+
+export function buildFinishLineText({
+  elapsedMs,
+  label,
+  model,
+  report,
+  costUsd,
+  detailed,
+  extraParts,
+}: {
+  elapsedMs: number
+  label?: string | null
+  model: string | null
+  report: {
+    llm: Array<{
+      promptTokens: number | null
+      completionTokens: number | null
+      totalTokens: number | null
+      calls: number
+    }>
+    services: { firecrawl: { requests: number }; apify: { requests: number } }
+  }
+  costUsd: number | null
+  detailed: boolean
+  extraParts?: string[] | null
+}): FinishLineText {
   const promptTokens = sumNumbersOrNull(report.llm.map((row) => row.promptTokens))
   const completionTokens = sumNumbersOrNull(report.llm.map((row) => row.completionTokens))
   const totalTokens = sumNumbersOrNull(report.llm.map((row) => row.totalTokens))
@@ -236,12 +283,9 @@ export function writeFinishLine({
     model ? formatModelLabelForDisplay(model) : null,
     tokensPart,
   ]
-  const line1 = summaryParts.filter((part): part is string => typeof part === 'string').join(' · ')
+  const line = summaryParts.filter((part): part is string => typeof part === 'string').join(' · ')
 
   const totalCalls = report.llm.reduce((sum, row) => sum + row.calls, 0)
-
-  stderr.write('\n')
-  stderr.write(`${ansi('1;32', line1, color)}\n`)
   const lenParts =
     filteredExtraParts?.filter(
       (part) => part.startsWith('input=') || part.startsWith('transcript=')
@@ -250,10 +294,6 @@ export function writeFinishLine({
     filteredExtraParts?.filter(
       (part) => !part.startsWith('input=') && !part.startsWith('transcript=')
     ) ?? []
-
-  if (!detailed) {
-    return
-  }
 
   const line2Segments: string[] = []
   if (lenParts.length > 0) {
@@ -274,9 +314,8 @@ export function writeFinishLine({
     line2Segments.push(...miscParts)
   }
 
-  if (line2Segments.length > 0) {
-    stderr.write(`${ansi('0;90', line2Segments.join(' | '), color)}\n`)
-  }
+  if (!detailed || line2Segments.length === 0) return { line, details: null }
+  return { line, details: line2Segments.join(' | ') }
 }
 
 export function buildExtractFinishLabel(args: {
