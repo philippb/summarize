@@ -353,6 +353,25 @@ describe('config loading', () => {
     })
   })
 
+  it('parses cache config', () => {
+    const { root } = writeJsonConfig({
+      cache: {
+        enabled: false,
+        maxMb: 256,
+        ttlDays: 14,
+        path: '/tmp/summarize-cache.sqlite',
+      },
+    })
+    expect(loadSummarizeConfig({ env: { HOME: root } }).config).toEqual({
+      cache: {
+        enabled: false,
+        maxMb: 256,
+        ttlDays: 14,
+        path: '/tmp/summarize-cache.sqlite',
+      },
+    })
+  })
+
   it('rejects invalid cli enabled providers', () => {
     const { root } = writeJsonConfig({ cli: { enabled: ['nope'] } })
     expect(() => loadSummarizeConfig({ env: { HOME: root } })).toThrow(/unknown CLI provider/)

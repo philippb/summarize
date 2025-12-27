@@ -1,5 +1,6 @@
 import type { SummarizeConfig } from '../../../config.js'
 import type { LlmCall, RunMetricsReport } from '../../../costs.js'
+import type { CacheState } from '../../../cache.js'
 import type { OutputLanguage } from '../../../language.js'
 import type { ExecFileFn } from '../../../markitdown.js'
 import type { FixedModelSpec, RequestedModel } from '../../../model-spec.js'
@@ -74,6 +75,7 @@ export type UrlFlowContext = {
   }
   trackedFetch: typeof fetch
   summaryEngine: ReturnType<typeof createSummaryEngine>
+  cache: CacheState
   summarizeAsset: (args: SummarizeAssetArgs) => Promise<void>
   writeViaFooter: (parts: string[]) => void
   clearProgressForStdout: () => void

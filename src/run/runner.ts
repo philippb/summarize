@@ -2,6 +2,13 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { CommanderError } from 'commander'
 import {
+  DEFAULT_CACHE_MAX_MB,
+  DEFAULT_CACHE_TTL_DAYS,
+  clearCacheFiles,
+  createCacheStore,
+  resolveCachePath,
+} from '../cache.js'
+import {
   parseDurationMs,
   parseExtractFormat,
   parseFirecrawlMode,
@@ -22,6 +29,7 @@ import {
   handleHelpRequest,
   handleRefreshFreeRequest,
 } from './cli-preflight.js'
+import { loadSummarizeConfig } from '../config.js'
 import { parseCliProviderArg } from './env.js'
 import { handleFileInput, handleUrlAsset } from './flows/asset/input.js'
 import { summarizeAsset as summarizeAssetFlow } from './flows/asset/summary.js'
@@ -136,6 +144,25 @@ export async function runCli(
     promptOverride = trimmed
   }
 
+  const clearCacheFlag = normalizedArgv.includes('--clear-cache')
+  if (clearCacheFlag) {
+    const extraArgs = normalizedArgv.filter((arg) => arg !== '--clear-cache')
+    if (extraArgs.length > 0) {
+      throw new Error('--clear-cache must be used alone.')
+    }
+    const { config } = loadSummarizeConfig({ env: envForRun })
+    const cachePath = resolveCachePath({
+      env: envForRun,
+      cachePath: config?.cache?.path ?? null,
+    })
+    if (!cachePath) {
+      throw new Error('Unable to resolve cache path (missing HOME).')
+    }
+    clearCacheFiles(cachePath)
+    stdout.write('Cache cleared.\n')
+    return
+  }
+
   const cliFlagPresent = normalizedArgv.some((arg) => arg === '--cli' || arg.startsWith('--cli='))
   let cliProviderArgRaw = typeof program.opts().cli === 'string' ? program.opts().cli : null
   const inputResolution = resolveRunInput({
@@ -170,6 +197,7 @@ export async function runCli(
       arg.startsWith('--lang=')
   )
   const retries = parseRetriesArg(program.opts().retries as string)
+  const noCacheFlag = Boolean(program.opts().noCache)
   const extractMode = Boolean(program.opts().extract) || Boolean(program.opts().extractOnly)
   const json = Boolean(program.opts().json)
   const streamMode = parseStreamMode(program.opts().stream as string)
@@ -268,7 +296,33 @@ export async function runCli(
     promptOverride && languageExplicitlySet && outputLanguage.kind === 'fixed'
       ? `Output should be ${outputLanguage.label}.`
       : null
-  const {
+
+  const cacheEnabled = config?.cache?.enabled !== false
+  const cachePath = resolveCachePath({
+    env: envForRun,
+    cachePath: config?.cache?.path ?? null,
+  })
+  const cacheMaxMb =
+    typeof config?.cache?.maxMb === 'number' ? config.cache.maxMb : DEFAULT_CACHE_MAX_MB
+  const cacheTtlDays =
+    typeof config?.cache?.ttlDays === 'number' ? config.cache.ttlDays : DEFAULT_CACHE_TTL_DAYS
+  const cacheMaxBytes = Math.max(0, cacheMaxMb) * 1024 * 1024
+  const cacheTtlMs = Math.max(0, cacheTtlDays) * 24 * 60 * 60 * 1000
+  const cacheMode = !cacheEnabled || noCacheFlag || !cachePath ? 'bypass' : 'default'
+  const cacheStore =
+    cacheMode === 'default' && cachePath
+      ? await createCacheStore({ path: cachePath, maxBytes: cacheMaxBytes })
+      : null
+  const cacheState = {
+    mode: cacheMode,
+    store: cacheStore,
+    ttlMs: cacheTtlMs,
+    maxBytes: cacheMaxBytes,
+    path: cachePath,
+  }
+
+  try {
+    const {
     apiKey,
     openrouterApiKey,
     openrouterConfigured,
@@ -439,6 +493,7 @@ export async function runCli(
     buildReport,
     estimateCostUsd,
     llmCalls,
+    cache: cacheState,
     apiStatus: {
       xaiApiKey,
       apiKey,
@@ -553,7 +608,11 @@ export async function runCli(
     buildReport,
     estimateCostUsd,
     llmCalls,
+    cache: cacheState,
   }
 
   await runUrlFlow({ ctx: urlFlowContext, url, isYoutubeUrl })
+  } finally {
+    cacheStore?.close()
+  }
 }

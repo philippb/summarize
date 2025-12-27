@@ -76,6 +76,21 @@ Example:
   "prompt": "Explain for a kid. Short sentences. Simple words."
 }
 ```
+
+## Cache
+
+Configure the on-disk SQLite cache (extracted content, transcripts, summaries).
+
+```json
+{
+  "cache": {
+    "enabled": true,
+    "maxMb": 512,
+    "ttlDays": 30,
+    "path": "~/.summarize/cache.sqlite"
+  }
+}
+```
 ```
 
 ## Presets

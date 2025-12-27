@@ -47,6 +47,10 @@ installed, auto mode can use local CLI models when `cli.enabled` is set (see `do
   - Overrides the built-in summary instructions (prompt becomes the instruction prefix).
   - Prompts are wrapped in `<instructions>`, `<context>`, `<content>` tags.
   - When `--length` is numeric, we add `Output is X characters.` When `--language` is explicitly set, we add `Output should be <language>.`
+- `--no-cache`
+  - Bypass cache reads and writes (extracted content, transcripts, summaries).
+- `--clear-cache`
+  - Delete the cache database and exit. Must be used alone.
 - `--video-mode auto|transcript|understand`
   - Only relevant for video inputs / video-only pages.
 - `--length short|medium|long|xl|xxl|<chars>`

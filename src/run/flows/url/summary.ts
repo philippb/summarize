@@ -2,8 +2,15 @@ import { countTokens } from 'gpt-tokenizer'
 import { render as renderMarkdownAnsi } from 'markdansi'
 import type { ExtractedLinkContent } from '../../../content/index.js'
 import { formatOutputLanguageForJson } from '../../../language.js'
+import { parseGatewayStyleModelId } from '../../../llm/model-id.js'
 import { buildAutoModelAttempts } from '../../../model-auto.js'
 import { buildLinkSummaryPrompt } from '../../../prompts/index.js'
+import {
+  buildSummaryCacheKey,
+  extractTaggedBlock,
+  hashString,
+  normalizeContentForHash,
+} from '../../../cache.js'
 import { parseCliUserModelId } from '../../env.js'
 import {
   buildExtractFinishLabel,
@@ -86,6 +93,28 @@ const pickModelForFinishLine = (llmCalls: UrlFlowContext['llmCalls'], fallback: 
     (llmCalls.length > 0 ? (llmCalls[llmCalls.length - 1]?.model ?? null) : null) ??
     fallback
   )
+}
+
+const buildLengthKey = (lengthArg: UrlFlowContext['lengthArg']): string =>
+  lengthArg.kind === 'preset' ? `preset:${lengthArg.preset}` : `chars:${lengthArg.maxCharacters}`
+
+const buildLanguageKey = (outputLanguage: UrlFlowContext['outputLanguage']): string =>
+  outputLanguage.kind === 'auto' ? 'auto' : outputLanguage.tag
+
+const buildPromptHash = (prompt: string): string => {
+  const instructions = extractTaggedBlock(prompt, 'instructions') ?? prompt
+  return hashString(instructions.trim())
+}
+
+const buildModelMetaFromAttempt = (attempt: ModelAttempt) => {
+  if (attempt.transport === 'cli') {
+    return { provider: 'cli' as const, canonical: attempt.userModelId }
+  }
+  const parsed = parseGatewayStyleModelId(attempt.llmModelId ?? attempt.userModelId)
+  const canonical = attempt.userModelId.toLowerCase().startsWith('openrouter/')
+    ? attempt.userModelId
+    : parsed.canonical
+  return { provider: parsed.provider, canonical }
 }
 
 export async function outputExtractedUrl({
@@ -297,42 +326,87 @@ export async function summarizeExtractedUrl({
     ]
   })()
 
-  const attemptOutcome = await runModelAttempts({
-    attempts,
-    isFallbackModel: ctx.isFallbackModel,
-    isNamedModelSelection: ctx.isNamedModelSelection,
-    envHasKeyFor: ctx.summaryEngine.envHasKeyFor,
-    formatMissingModelError: ctx.summaryEngine.formatMissingModelError,
-    onAutoSkip: (attempt) => {
-      writeVerbose(
-        ctx.stderr,
-        ctx.verbose,
-        `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`,
-        ctx.verboseColor
-      )
-    },
-    onAutoFailure: (attempt, error) => {
-      writeVerbose(
-        ctx.stderr,
-        ctx.verbose,
-        `auto failed ${attempt.userModelId}: ${error instanceof Error ? error.message : String(error)}`,
-        ctx.verboseColor
-      )
-    },
-    onFixedModelError: (_attempt, error) => {
-      throw error
-    },
-    runAttempt: (attempt) =>
-      ctx.summaryEngine.runSummaryAttempt({
-        attempt,
-        prompt,
-        allowStreaming: ctx.streamingEnabled,
-        onModelChosen: onModelChosen ?? null,
-      }),
-  })
-  const summaryResult = attemptOutcome.result
-  const usedAttempt = attemptOutcome.usedAttempt
-  const { lastError, missingRequiredEnvs, sawOpenRouterNoAllowedProviders } = attemptOutcome
+  const cacheStore = ctx.cache.mode === 'default' ? ctx.cache.store : null
+  const contentHash = cacheStore ? hashString(normalizeContentForHash(extracted.content)) : null
+  const promptHash = cacheStore ? buildPromptHash(prompt) : null
+  const lengthKey = buildLengthKey(ctx.lengthArg)
+  const languageKey = buildLanguageKey(ctx.outputLanguage)
+
+  let summaryResult: Awaited<ReturnType<typeof ctx.summaryEngine.runSummaryAttempt>> | null = null
+  let usedAttempt: ModelAttempt | null = null
+  let summaryFromCache = false
+
+  if (cacheStore && contentHash && promptHash) {
+    for (const attempt of attempts) {
+      if (!ctx.summaryEngine.envHasKeyFor(attempt.requiredEnv)) continue
+      const key = buildSummaryCacheKey({
+        contentHash,
+        promptHash,
+        model: attempt.userModelId,
+        lengthKey,
+        languageKey,
+      })
+      const cached = cacheStore.getText('summary', key)
+      if (!cached) continue
+      onModelChosen?.(attempt.userModelId)
+      summaryResult = {
+        summary: cached,
+        summaryAlreadyPrinted: false,
+        modelMeta: buildModelMetaFromAttempt(attempt),
+        maxOutputTokensForCall: null,
+      }
+      usedAttempt = attempt
+      summaryFromCache = true
+      break
+    }
+  }
+
+  let lastError: unknown = null
+  let missingRequiredEnvs = new Set<ModelAttempt['requiredEnv']>()
+  let sawOpenRouterNoAllowedProviders = false
+
+  if (!summaryResult || !usedAttempt) {
+    const attemptOutcome = await runModelAttempts({
+      attempts,
+      isFallbackModel: ctx.isFallbackModel,
+      isNamedModelSelection: ctx.isNamedModelSelection,
+      envHasKeyFor: ctx.summaryEngine.envHasKeyFor,
+      formatMissingModelError: ctx.summaryEngine.formatMissingModelError,
+      onAutoSkip: (attempt) => {
+        writeVerbose(
+          ctx.stderr,
+          ctx.verbose,
+          `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`,
+          ctx.verboseColor
+        )
+      },
+      onAutoFailure: (attempt, error) => {
+        writeVerbose(
+          ctx.stderr,
+          ctx.verbose,
+          `auto failed ${attempt.userModelId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          ctx.verboseColor
+        )
+      },
+      onFixedModelError: (_attempt, error) => {
+        throw error
+      },
+      runAttempt: (attempt) =>
+        ctx.summaryEngine.runSummaryAttempt({
+          attempt,
+          prompt,
+          allowStreaming: ctx.streamingEnabled,
+          onModelChosen: onModelChosen ?? null,
+        }),
+    })
+    summaryResult = attemptOutcome.result
+    usedAttempt = attemptOutcome.usedAttempt
+    lastError = attemptOutcome.lastError
+    missingRequiredEnvs = attemptOutcome.missingRequiredEnvs
+    sawOpenRouterNoAllowedProviders = attemptOutcome.sawOpenRouterNoAllowedProviders
+  }
 
   if (!summaryResult || !usedAttempt) {
     // Auto mode: surface raw extracted content when no model can run.
@@ -435,6 +509,17 @@ export async function summarizeExtractedUrl({
       )
     }
     return
+  }
+
+  if (!summaryFromCache && cacheStore && contentHash && promptHash) {
+    const key = buildSummaryCacheKey({
+      contentHash,
+      promptHash,
+      model: usedAttempt.userModelId,
+      lengthKey,
+      languageKey,
+    })
+    cacheStore.setText('summary', key, summaryResult.summary, ctx.cache.ttlMs)
   }
 
   const { summary, summaryAlreadyPrinted, modelMeta, maxOutputTokensForCall } = summaryResult

@@ -1,5 +1,6 @@
 import { loadRemoteAsset } from '../../../content/asset.js'
-import { createLinkPreviewClient } from '../../../content/index.js'
+import { createLinkPreviewClient, type ExtractedLinkContent } from '../../../content/index.js'
+import { buildExtractCacheKey } from '../../../cache.js'
 import { createFirecrawlScraper } from '../../../firecrawl.js'
 import { createOscProgressController } from '../../../tty/osc-progress.js'
 import { startSpinner } from '../../../tty/spinner.js'
@@ -106,6 +107,9 @@ export async function runUrlFlow({
     oscProgress,
   })
 
+  const cacheStore = ctx.cache.mode === 'default' ? ctx.cache.store : null
+  const transcriptCache = cacheStore ? cacheStore.transcriptCache : null
+
   const client = createLinkPreviewClient({
     apifyApiToken: ctx.apiStatus.apifyToken,
     ytDlpPath: ctx.apiStatus.ytDlpPath,
@@ -115,6 +119,7 @@ export async function runUrlFlow({
     convertHtmlToMarkdown: markdown.convertHtmlToMarkdown,
     readTweetWithBird: readTweetWithBirdClient,
     fetch: ctx.trackedFetch,
+    transcriptCache,
     onProgress: websiteProgress?.onProgress ?? null,
   })
 
@@ -131,18 +136,46 @@ export async function runUrlFlow({
   }
   ctx.setClearProgressBeforeStdout(clearProgressLine)
   try {
-    let extracted = await fetchLinkContentWithBirdTip({
-      client,
-      url,
-      options: {
-        timeoutMs: ctx.timeoutMs,
-        youtubeTranscript: ctx.youtubeMode,
-        firecrawl: ctx.firecrawlMode,
-        format: markdown.markdownRequested ? 'markdown' : 'text',
-        markdownMode: markdown.markdownRequested ? markdown.effectiveMarkdownMode : undefined,
-      },
-      env: ctx.env,
+    const buildFetchOptions = () => ({
+      timeoutMs: ctx.timeoutMs,
+      youtubeTranscript: ctx.youtubeMode,
+      firecrawl: ctx.firecrawlMode,
+      format: markdown.markdownRequested ? 'markdown' : 'text',
+      markdownMode: markdown.markdownRequested ? markdown.effectiveMarkdownMode : undefined,
+      cacheMode: ctx.cache.mode,
     })
+
+    const fetchWithCache = async (targetUrl: string): Promise<ExtractedLinkContent> => {
+      const options = buildFetchOptions()
+      const cacheKey =
+        cacheStore && ctx.cache.mode === 'default'
+          ? buildExtractCacheKey({
+              url: targetUrl,
+              options: {
+                youtubeTranscript: options.youtubeTranscript,
+                firecrawl: options.firecrawl,
+                format: options.format,
+                markdownMode: options.markdownMode ?? null,
+              },
+            })
+          : null
+      if (cacheKey && cacheStore) {
+        const cached = cacheStore.getJson<ExtractedLinkContent>('extract', cacheKey)
+        if (cached) return cached
+      }
+      const extracted = await fetchLinkContentWithBirdTip({
+        client,
+        url: targetUrl,
+        options,
+        env: ctx.env,
+      })
+      if (cacheKey && cacheStore) {
+        cacheStore.setJson('extract', cacheKey, extracted, ctx.cache.ttlMs)
+      }
+      return extracted
+    }
+
+    let extracted = await fetchWithCache(url)
     let extractionUi = deriveExtractionUi(extracted)
 
     const updateSummaryProgress = () => {
@@ -188,18 +221,7 @@ export async function runUrlFlow({
         if (ctx.progressEnabled) {
           spinner.setText('Video-only page: fetching YouTube transcript…')
         }
-        extracted = await fetchLinkContentWithBirdTip({
-          client,
-          url: extracted.video.url,
-          options: {
-            timeoutMs: ctx.timeoutMs,
-            youtubeTranscript: ctx.youtubeMode,
-            firecrawl: ctx.firecrawlMode,
-            format: markdown.markdownRequested ? 'markdown' : 'text',
-            markdownMode: markdown.markdownRequested ? markdown.effectiveMarkdownMode : undefined,
-          },
-          env: ctx.env,
-        })
+        extracted = await fetchWithCache(extracted.video.url)
         extractionUi = deriveExtractionUi(extracted)
         updateSummaryProgress()
       } else if (extracted.video.kind === 'direct') {

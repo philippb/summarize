@@ -7,6 +7,7 @@
 - `docs/cli.md` — CLI models (Claude/Codex/Gemini)
 - `docs/model-auto.md` — automatic model selection (`--model auto`)
 - `docs/language.md` — output language (`--language` / config `language`)
+- `docs/cache.md` — cache design + config (SQLite)
 - `docs/manual-tests.md` — manual end-to-end test checklist
 - `docs/extract-only.md` — extract mode (no summary LLM call)
 

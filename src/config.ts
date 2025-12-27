@@ -78,6 +78,15 @@ export type SummarizeConfig = {
    */
   prompt?: string
   /**
+   * Cache settings for extracted content, transcripts, and summaries.
+   */
+  cache?: {
+    enabled?: boolean
+    maxMb?: number
+    ttlDays?: number
+    path?: string
+  }
+  /**
    * Named model presets selectable via `--model <name>`.
    *
    * Note: `auto` is reserved and cannot be defined here.
@@ -527,6 +536,51 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
     return Object.keys(out).length > 0 ? out : undefined
   })()
 
+  const cache = (() => {
+    const value = (parsed as Record<string, unknown>).cache
+    if (typeof value === 'undefined') return undefined
+    if (!isRecord(value)) {
+      throw new Error(`Invalid config file ${path}: "cache" must be an object.`)
+    }
+    const enabled =
+      typeof value.enabled === 'boolean' ? (value.enabled as boolean) : undefined
+    const maxMbRaw = value.maxMb
+    const maxMb =
+      typeof maxMbRaw === 'number' && Number.isFinite(maxMbRaw) && maxMbRaw > 0
+        ? maxMbRaw
+        : typeof maxMbRaw === 'undefined'
+          ? undefined
+          : (() => {
+              throw new Error(`Invalid config file ${path}: "cache.maxMb" must be a number.`)
+            })()
+    const ttlDaysRaw = value.ttlDays
+    const ttlDays =
+      typeof ttlDaysRaw === 'number' && Number.isFinite(ttlDaysRaw) && ttlDaysRaw > 0
+        ? ttlDaysRaw
+        : typeof ttlDaysRaw === 'undefined'
+          ? undefined
+          : (() => {
+              throw new Error(`Invalid config file ${path}: "cache.ttlDays" must be a number.`)
+            })()
+    const pathValue =
+      typeof value.path === 'string' && value.path.trim().length > 0
+        ? value.path.trim()
+        : typeof value.path === 'undefined'
+          ? undefined
+          : (() => {
+              throw new Error(`Invalid config file ${path}: "cache.path" must be a string.`)
+            })()
+
+    return enabled || maxMb || ttlDays || pathValue
+      ? {
+          ...(typeof enabled === 'boolean' ? { enabled } : {}),
+          ...(typeof maxMb === 'number' ? { maxMb } : {}),
+          ...(typeof ttlDays === 'number' ? { ttlDays } : {}),
+          ...(typeof pathValue === 'string' ? { path: pathValue } : {}),
+        }
+      : undefined
+  })()
+
   const media = (() => {
     const value = parsed.media
     if (!isRecord(value)) return undefined
@@ -630,6 +684,7 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
       ...(model ? { model } : {}),
       ...(language ? { language } : {}),
       ...(prompt ? { prompt } : {}),
+      ...(cache ? { cache } : {}),
       ...(models ? { models } : {}),
       ...(media ? { media } : {}),
       ...(output ? { output } : {}),

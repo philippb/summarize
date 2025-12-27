@@ -3,6 +3,13 @@ import { countTokens } from 'gpt-tokenizer'
 import { render as renderMarkdownAnsi } from 'markdansi'
 import type { CliProvider, SummarizeConfig } from '../../../config.js'
 import type { LlmCall, RunMetricsReport } from '../../../costs.js'
+import {
+  buildSummaryCacheKey,
+  extractTaggedBlock,
+  hashString,
+  normalizeContentForHash,
+  type CacheState,
+} from '../../../cache.js'
 import type { OutputLanguage } from '../../../language.js'
 import { formatOutputLanguageForJson } from '../../../language.js'
 import { parseGatewayStyleModelId } from '../../../llm/model-id.js'
@@ -27,6 +34,30 @@ import type { createSummaryEngine } from '../../summary-engine.js'
 import { isRichTty, markdownRenderWidth, supportsColor } from '../../terminal.js'
 import type { ModelAttempt } from '../../types.js'
 import { prepareAssetPrompt } from './preprocess.js'
+
+const buildLengthKey = (
+  lengthArg: AssetSummaryContext['lengthArg']
+): string =>
+  lengthArg.kind === 'preset' ? `preset:${lengthArg.preset}` : `chars:${lengthArg.maxCharacters}`
+
+const buildLanguageKey = (outputLanguage: OutputLanguage): string =>
+  outputLanguage.kind === 'auto' ? 'auto' : outputLanguage.tag
+
+const buildPromptHash = (prompt: string): string => {
+  const instructions = extractTaggedBlock(prompt, 'instructions') ?? prompt
+  return hashString(instructions.trim())
+}
+
+const buildModelMetaFromAttempt = (attempt: ModelAttempt) => {
+  if (attempt.transport === 'cli') {
+    return { provider: 'cli' as const, canonical: attempt.userModelId }
+  }
+  const parsed = parseGatewayStyleModelId(attempt.llmModelId ?? attempt.userModelId)
+  const canonical = attempt.userModelId.toLowerCase().startsWith('openrouter/')
+    ? attempt.userModelId
+    : parsed.canonical
+  return { provider: parsed.provider, canonical }
+}
 
 export type AssetSummaryContext = {
   env: Record<string, string | undefined>
@@ -74,6 +105,7 @@ export type AssetSummaryContext = {
   buildReport: () => Promise<RunMetricsReport>
   estimateCostUsd: () => Promise<number | null>
   llmCalls: LlmCall[]
+  cache: CacheState
   apiStatus: {
     xaiApiKey: string | null
     apiKey: string | null
@@ -237,49 +269,98 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
     }
   })()
 
-  const attemptOutcome = await runModelAttempts({
-    attempts,
-    isFallbackModel: ctx.isFallbackModel,
-    isNamedModelSelection: ctx.isNamedModelSelection,
-    envHasKeyFor: ctx.summaryEngine.envHasKeyFor,
-    formatMissingModelError: ctx.summaryEngine.formatMissingModelError,
-    onAutoSkip: (attempt) => {
-      writeVerbose(
-        ctx.stderr,
-        ctx.verbose,
-        `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`,
-        ctx.verboseColor
-      )
-    },
-    onAutoFailure: (attempt, error) => {
-      writeVerbose(
-        ctx.stderr,
-        ctx.verbose,
-        `auto failed ${attempt.userModelId}: ${error instanceof Error ? error.message : String(error)}`,
-        ctx.verboseColor
-      )
-    },
-    onFixedModelError: (attempt, error) => {
-      if (isUnsupportedAttachmentError(error)) {
-        throw new Error(
-          `Model ${attempt.userModelId} does not support attaching files of type ${args.attachment.mediaType}. Try a different --model.`,
-          { cause: error }
-        )
+  const cacheStore = ctx.cache.mode === 'default' ? ctx.cache.store : null
+  const contentBlock = extractTaggedBlock(promptText, 'content')
+  const contentHash =
+    cacheStore && contentBlock && contentBlock.trim().length > 0
+      ? hashString(normalizeContentForHash(contentBlock))
+      : null
+  const promptHash = cacheStore ? buildPromptHash(promptText) : null
+  const lengthKey = buildLengthKey(ctx.lengthArg)
+  const languageKey = buildLanguageKey(ctx.outputLanguage)
+
+  let summaryResult: Awaited<ReturnType<typeof ctx.summaryEngine.runSummaryAttempt>> | null = null
+  let usedAttempt: ModelAttempt | null = null
+  let summaryFromCache = false
+
+  if (cacheStore && contentHash && promptHash) {
+    for (const attempt of attempts) {
+      if (!ctx.summaryEngine.envHasKeyFor(attempt.requiredEnv)) continue
+      const key = buildSummaryCacheKey({
+        contentHash,
+        promptHash,
+        model: attempt.userModelId,
+        lengthKey,
+        languageKey,
+      })
+      const cached = cacheStore.getText('summary', key)
+      if (!cached) continue
+      args.onModelChosen?.(attempt.userModelId)
+      summaryResult = {
+        summary: cached,
+        summaryAlreadyPrinted: false,
+        modelMeta: buildModelMetaFromAttempt(attempt),
+        maxOutputTokensForCall: null,
       }
-      throw error
-    },
-    runAttempt: (attempt) =>
-      ctx.summaryEngine.runSummaryAttempt({
-        attempt,
-        prompt: promptPayload,
-        allowStreaming: ctx.streamingEnabled,
-        onModelChosen: args.onModelChosen ?? null,
-        cli: cliContext,
-      }),
-  })
-  const summaryResult = attemptOutcome.result
-  const usedAttempt = attemptOutcome.usedAttempt
-  const { lastError, missingRequiredEnvs, sawOpenRouterNoAllowedProviders } = attemptOutcome
+      usedAttempt = attempt
+      summaryFromCache = true
+      break
+    }
+  }
+
+  let lastError: unknown = null
+  let missingRequiredEnvs = new Set<ModelAttempt['requiredEnv']>()
+  let sawOpenRouterNoAllowedProviders = false
+
+  if (!summaryResult || !usedAttempt) {
+    const attemptOutcome = await runModelAttempts({
+      attempts,
+      isFallbackModel: ctx.isFallbackModel,
+      isNamedModelSelection: ctx.isNamedModelSelection,
+      envHasKeyFor: ctx.summaryEngine.envHasKeyFor,
+      formatMissingModelError: ctx.summaryEngine.formatMissingModelError,
+      onAutoSkip: (attempt) => {
+        writeVerbose(
+          ctx.stderr,
+          ctx.verbose,
+          `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`,
+          ctx.verboseColor
+        )
+      },
+      onAutoFailure: (attempt, error) => {
+        writeVerbose(
+          ctx.stderr,
+          ctx.verbose,
+          `auto failed ${attempt.userModelId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          ctx.verboseColor
+        )
+      },
+      onFixedModelError: (attempt, error) => {
+        if (isUnsupportedAttachmentError(error)) {
+          throw new Error(
+            `Model ${attempt.userModelId} does not support attaching files of type ${args.attachment.mediaType}. Try a different --model.`,
+            { cause: error }
+          )
+        }
+        throw error
+      },
+      runAttempt: (attempt) =>
+        ctx.summaryEngine.runSummaryAttempt({
+          attempt,
+          prompt: promptPayload,
+          allowStreaming: ctx.streamingEnabled,
+          onModelChosen: args.onModelChosen ?? null,
+          cli: cliContext,
+        }),
+    })
+    summaryResult = attemptOutcome.result
+    usedAttempt = attemptOutcome.usedAttempt
+    lastError = attemptOutcome.lastError
+    missingRequiredEnvs = attemptOutcome.missingRequiredEnvs
+    sawOpenRouterNoAllowedProviders = attemptOutcome.sawOpenRouterNoAllowedProviders
+  }
 
   if (!summaryResult || !usedAttempt) {
     const withFreeTip = (message: string) => {
@@ -321,6 +402,17 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
     }
     if (lastError instanceof Error) throw lastError
     throw new Error('No model available for this input')
+  }
+
+  if (!summaryFromCache && cacheStore && contentHash && promptHash) {
+    const key = buildSummaryCacheKey({
+      contentHash,
+      promptHash,
+      model: usedAttempt.userModelId,
+      lengthKey,
+      languageKey,
+    })
+    cacheStore.setText('summary', key, summaryResult.summary, ctx.cache.ttlMs)
   }
 
   const { summary, summaryAlreadyPrinted, modelMeta, maxOutputTokensForCall } = summaryResult
