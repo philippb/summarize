@@ -1,23 +1,29 @@
 import { defineBackground } from 'wxt/utils/define-background'
 
 import { loadSettings, patchSettings } from '../lib/settings'
-import { parseSseStream } from '../lib/sse'
 
 type PanelToBg =
   | { type: 'panel:ready' }
   | { type: 'panel:summarize' }
+  | { type: 'panel:ping' }
+  | { type: 'panel:rememberUrl'; url: string }
   | { type: 'panel:setAuto'; value: boolean }
   | { type: 'panel:setModel'; value: string }
   | { type: 'panel:openOptions' }
 
+type RunStart = {
+  id: string
+  url: string
+  title: string | null
+  model: string
+  reason: string
+}
+
 type BgToPanel =
   | { type: 'ui:state'; state: UiState }
   | { type: 'ui:status'; status: string }
-  | { type: 'summary:reset' }
-  | { type: 'summary:chunk'; text: string }
-  | { type: 'summary:meta'; model: string }
-  | { type: 'summary:done' }
-  | { type: 'summary:error'; message: string }
+  | { type: 'run:start'; run: RunStart }
+  | { type: 'run:error'; message: string }
 
 type UiState = {
   panelOpen: boolean
@@ -154,10 +160,9 @@ export default defineBackground(() => {
   let panelPort: chrome.runtime.Port | null = null
   let panelOpen = false
   let lastSummarizedUrl: string | null = null
+  let inflightUrl: string | null = null
   let runController: AbortController | null = null
   let lastNavAt = 0
-  let gotAnyChunkForRun = false
-  let streamedAnyNonWhitespace = false
 
   const send = (msg: BgToPanel) => panelPort?.postMessage(msg)
   const sendStatus = (status: string) => send({ type: 'ui:status', status })
@@ -193,25 +198,30 @@ export default defineBackground(() => {
 
     const tab = await getActiveTab()
     if (!tab?.id || !canSummarizeUrl(tab.url)) return
-    if (settings.autoSummarize && lastSummarizedUrl === tab.url && reason !== 'manual') return
 
     runController?.abort()
     runController = new AbortController()
-    gotAnyChunkForRun = false
-    streamedAnyNonWhitespace = false
-
-    send({ type: 'summary:reset' })
     sendStatus(`Extracting… (${reason})`)
 
     const extractedAttempt = await extractFromTab(tab.id, settings.maxChars)
     if (!extractedAttempt.ok) {
-      send({ type: 'summary:error', message: extractedAttempt.error })
+      send({ type: 'run:error', message: extractedAttempt.error })
       sendStatus(`Error: ${extractedAttempt.error}`)
       return
     }
     const extracted = extractedAttempt.data
 
+    if (
+      settings.autoSummarize &&
+      (lastSummarizedUrl === extracted.url || inflightUrl === extracted.url) &&
+      reason !== 'manual'
+    ) {
+      sendStatus('')
+      return
+    }
+
     sendStatus('Requesting daemon…')
+    inflightUrl = extracted.url
     let id: string
     try {
       const res = await fetch('http://127.0.0.1:8787/v1/summarize', {
@@ -237,56 +247,16 @@ export default defineBackground(() => {
     } catch (err) {
       if (runController.signal.aborted) return
       const message = friendlyFetchError(err, 'Daemon request failed')
-      send({ type: 'summary:error', message })
+      send({ type: 'run:error', message })
       sendStatus(`Error: ${message}`)
+      inflightUrl = null
       return
     }
 
-    sendStatus('Streaming…')
-
-    try {
-      const res = await fetch(`http://127.0.0.1:8787/v1/summarize/${id}/events`, {
-        headers: { Authorization: `Bearer ${settings.token.trim()}` },
-        signal: runController.signal,
-      })
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-      if (!res.body) throw new Error('Missing stream body')
-
-      for await (const msg of parseSseStream(res.body)) {
-        if (msg.event === 'chunk') {
-          const data = JSON.parse(msg.data) as { text: string }
-          gotAnyChunkForRun = gotAnyChunkForRun || Boolean(data.text)
-          streamedAnyNonWhitespace = streamedAnyNonWhitespace || data.text.trim().length > 0
-          send({ type: 'summary:chunk', text: data.text })
-          if (streamedAnyNonWhitespace) sendStatus('')
-        } else if (msg.event === 'meta') {
-          const data = JSON.parse(msg.data) as { model: string }
-          send({ type: 'summary:meta', model: data.model })
-        } else if (msg.event === 'error') {
-          const data = JSON.parse(msg.data) as { message: string }
-          send({ type: 'summary:error', message: data.message })
-          break
-        } else if (msg.event === 'done') {
-          break
-        }
-      }
-
-      if (!streamedAnyNonWhitespace) {
-        const message = 'Model returned no output.'
-        send({ type: 'summary:error', message })
-        sendStatus(`Error: ${message}`)
-        return
-      }
-
-      lastSummarizedUrl = extracted.url
-      send({ type: 'summary:done' })
-      sendStatus('')
-    } catch (err) {
-      if (runController.signal.aborted) return
-      const message = friendlyFetchError(err, 'Stream failed')
-      send({ type: 'summary:error', message })
-      sendStatus(`Error: ${message}`)
-    }
+    send({
+      type: 'run:start',
+      run: { id, url: extracted.url, title: extracted.title, model: settings.model, reason },
+    })
   }
 
   chrome.runtime.onConnect.addListener((port) => {
@@ -299,6 +269,7 @@ export default defineBackground(() => {
       panelOpen = false
       runController?.abort()
       runController = null
+      inflightUrl = null
     })
 
     port.onMessage.addListener((msg: PanelToBg) => {
@@ -309,6 +280,12 @@ export default defineBackground(() => {
           return
         case 'panel:summarize':
           void summarizeActiveTab('manual')
+          return
+        case 'panel:ping':
+          return
+        case 'panel:rememberUrl':
+          lastSummarizedUrl = msg.url
+          inflightUrl = null
           return
         case 'panel:setAuto':
           void (async () => {

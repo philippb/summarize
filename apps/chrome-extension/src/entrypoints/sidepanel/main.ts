@@ -1,11 +1,14 @@
 import MarkdownIt from 'markdown-it'
 
 import { loadSettings, patchSettings } from '../../lib/settings'
+import { parseSseStream } from '../../lib/sse'
 import { generateToken } from '../../lib/token'
 
 type PanelToBg =
   | { type: 'panel:ready' }
   | { type: 'panel:summarize' }
+  | { type: 'panel:ping' }
+  | { type: 'panel:rememberUrl'; url: string }
   | { type: 'panel:setAuto'; value: boolean }
   | { type: 'panel:setModel'; value: string }
   | { type: 'panel:openOptions' }
@@ -18,14 +21,19 @@ type UiState = {
   status: string
 }
 
+type RunStart = {
+  id: string
+  url: string
+  title: string | null
+  model: string
+  reason: string
+}
+
 type BgToPanel =
   | { type: 'ui:state'; state: UiState }
   | { type: 'ui:status'; status: string }
-  | { type: 'summary:reset' }
-  | { type: 'summary:chunk'; text: string }
-  | { type: 'summary:meta'; model: string }
-  | { type: 'summary:done' }
-  | { type: 'summary:error'; message: string }
+  | { type: 'run:start'; run: RunStart }
+  | { type: 'run:error'; message: string }
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id)
@@ -56,6 +64,11 @@ const md = new MarkdownIt({
 let markdown = ''
 let renderQueued = 0
 let currentState: UiState | null = null
+let currentSource: { url: string; title: string | null } | null = null
+let streamController: AbortController | null = null
+let streamedAnyNonWhitespace = false
+let rememberedUrl = false
+let streaming = false
 
 function setStatus(text: string) {
   statusEl.textContent = text
@@ -98,6 +111,14 @@ function queueRender() {
 function applyTypography(fontFamily: string, fontSize: number) {
   document.documentElement.style.setProperty('--font-body', fontFamily)
   document.documentElement.style.setProperty('--font-size', `${fontSize}px`)
+}
+
+function friendlyFetchError(err: unknown, context: string): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (message.toLowerCase() === 'failed to fetch') {
+    return `${context}: Failed to fetch (daemon unreachable or blocked by Chrome; try \`summarize daemon status\` and check ~/.summarize/logs/daemon.err.log)`
+  }
+  return `${context}: ${message}`
 }
 
 async function ensureToken(): Promise<string> {
@@ -180,7 +201,10 @@ function maybeShowSetup(state: UiState) {
 function updateControls(state: UiState) {
   autoEl.checked = state.settings.autoSummarize
   modelEl.value = state.settings.model
-  subtitleEl.textContent = state.tab.title || state.tab.url || ''
+  if (currentSource && state.tab.url && state.tab.url !== currentSource.url && !streaming) {
+    currentSource = null
+  }
+  if (!currentSource) subtitleEl.textContent = state.tab.title || state.tab.url || ''
   setStatus(state.status)
   maybeShowSetup(state)
 }
@@ -195,21 +219,11 @@ port.onMessage.addListener((msg: BgToPanel) => {
     case 'ui:status':
       setStatus(msg.status)
       return
-    case 'summary:reset':
-      markdown = ''
-      renderEl.innerHTML = ''
-      return
-    case 'summary:chunk':
-      markdown += msg.text
-      queueRender()
-      return
-    case 'summary:meta':
-      subtitleEl.textContent = `${currentState?.tab.title || 'Current tab'} · ${msg.model}`
-      return
-    case 'summary:done':
-      return
-    case 'summary:error':
+    case 'run:error':
       setStatus(`Error: ${msg.message}`)
+      return
+    case 'run:start':
+      void startStream(msg.run)
       return
   }
 })
@@ -256,3 +270,79 @@ void (async () => {
   toggleDrawer(false)
   send({ type: 'panel:ready' })
 })()
+
+setInterval(() => {
+  send({ type: 'panel:ping' })
+}, 25_000)
+
+async function startStream(run: RunStart) {
+  const token = (await loadSettings()).token.trim()
+  if (!token) {
+    setStatus('Setup required (missing token)')
+    return
+  }
+
+  streamController?.abort()
+  const controller = new AbortController()
+  streamController = controller
+  streaming = true
+  streamedAnyNonWhitespace = false
+  rememberedUrl = false
+  currentSource = { url: run.url, title: run.title }
+
+  markdown = ''
+  renderEl.innerHTML = ''
+  subtitleEl.textContent = run.title || run.url
+  setStatus('Connecting…')
+
+  try {
+    const res = await fetch(`http://127.0.0.1:8787/v1/summarize/${run.id}/events`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.body) throw new Error('Missing stream body')
+
+    setStatus('Streaming…')
+
+    for await (const msg of parseSseStream(res.body)) {
+      if (controller.signal.aborted) return
+
+      if (msg.event === 'chunk') {
+        const data = JSON.parse(msg.data) as { text: string }
+        markdown += data.text
+        queueRender()
+
+        if (!streamedAnyNonWhitespace && data.text.trim().length > 0) {
+          streamedAnyNonWhitespace = true
+          setStatus('')
+          if (!rememberedUrl) {
+            rememberedUrl = true
+            send({ type: 'panel:rememberUrl', url: run.url })
+          }
+        }
+      } else if (msg.event === 'meta') {
+        const data = JSON.parse(msg.data) as { model: string }
+        const title = currentSource?.title || currentState?.tab.title || 'Current tab'
+        subtitleEl.textContent = `${title} · ${data.model}`
+      } else if (msg.event === 'error') {
+        const data = JSON.parse(msg.data) as { message: string }
+        throw new Error(data.message)
+      } else if (msg.event === 'done') {
+        break
+      }
+    }
+
+    if (!streamedAnyNonWhitespace) {
+      throw new Error('Model returned no output.')
+    }
+
+    setStatus('')
+  } catch (err) {
+    if (controller.signal.aborted) return
+    const message = friendlyFetchError(err, 'Stream failed')
+    setStatus(`Error: ${message}`)
+  } finally {
+    if (streamController === controller) streaming = false
+  }
+}

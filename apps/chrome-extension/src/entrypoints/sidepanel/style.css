@@ -46,7 +46,14 @@
 
 html,
 body {
-  height: 100%;
+  min-height: 100%;
+}
+
+html {
+  background:
+    radial-gradient(900px 520px at 18% -10%, rgba(122, 228, 243, 0.18), transparent 55%),
+    radial-gradient(900px 520px at 92% 10%, rgba(243, 198, 122, 0.18), transparent 55%),
+    linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 60%, var(--bg2) 100%);
 }
 
 body {
@@ -54,10 +61,7 @@ body {
   color: var(--text);
   font-family: var(--font-body);
   font-size: var(--font-size);
-  background:
-    radial-gradient(900px 520px at 18% -10%, rgba(122, 228, 243, 0.18), transparent 55%),
-    radial-gradient(900px 520px at 92% 10%, rgba(243, 198, 122, 0.18), transparent 55%),
-    linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 60%, var(--bg2) 100%);
+  background: transparent;
 }
 
 header {
@@ -257,7 +261,7 @@ main {
 
 .setup {
   border: 1px solid rgba(243, 198, 122, 0.25);
-  background: rgba(16, 19, 34, 0.7);
+  background: var(--surface);
   border-radius: 14px;
   padding: 12px;
   margin-bottom: 12px;
@@ -279,7 +283,7 @@ main {
   padding: 10px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(10, 12, 20, 0.6);
+  background: var(--field-bg);
   color: var(--text);
   font-size: 12px;
   overflow-x: auto;
