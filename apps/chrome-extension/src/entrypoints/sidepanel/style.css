@@ -331,6 +331,10 @@ main {
   line-height: 1.45;
 }
 
+.render > :first-child {
+  margin-top: 0;
+}
+
 .metrics {
   margin-top: 14px;
   padding-top: 12px;
