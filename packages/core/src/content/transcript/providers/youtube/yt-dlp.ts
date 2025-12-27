@@ -28,6 +28,8 @@ type YtDlpRequest = {
   falApiKey: string | null
   url: string
   onProgress?: ((event: LinkPreviewProgressEvent) => void) | null
+  service?: 'youtube' | 'podcast' | 'generic'
+  extraArgs?: string[]
 }
 
 export const fetchTranscriptWithYtDlp = async ({
@@ -36,6 +38,8 @@ export const fetchTranscriptWithYtDlp = async ({
   falApiKey,
   url,
   onProgress,
+  service = 'youtube',
+  extraArgs,
 }: YtDlpRequest): Promise<YtDlpTranscriptResult> => {
   const notes: string[] = []
 
@@ -84,16 +88,16 @@ export const fetchTranscriptWithYtDlp = async ({
     progress?.({
       kind: ProgressKind.TranscriptMediaDownloadStart,
       url,
-      service: 'youtube',
+      service,
       mediaUrl: url,
       totalBytes: null,
     })
-    await downloadAudio(ytDlpPath, url, outputFile)
+    await downloadAudio(ytDlpPath, url, outputFile, extraArgs)
     const stat = await fs.stat(outputFile)
     progress?.({
       kind: ProgressKind.TranscriptMediaDownloadDone,
       url,
-      service: 'youtube',
+      service,
       downloadedBytes: stat.size,
       totalBytes: null,
     })
@@ -102,7 +106,7 @@ export const fetchTranscriptWithYtDlp = async ({
     progress?.({
       kind: ProgressKind.TranscriptWhisperStart,
       url,
-      service: 'youtube',
+      service,
       providerHint,
       modelId,
       totalDurationSeconds: probedDurationSeconds,
@@ -119,7 +123,7 @@ export const fetchTranscriptWithYtDlp = async ({
         progress?.({
           kind: ProgressKind.TranscriptWhisperProgress,
           url,
-          service: 'youtube',
+          service,
           processedDurationSeconds: event.processedDurationSeconds,
           totalDurationSeconds: event.totalDurationSeconds,
           partIndex: event.partIndex,
@@ -141,7 +145,12 @@ export const fetchTranscriptWithYtDlp = async ({
   }
 }
 
-async function downloadAudio(ytDlpPath: string, url: string, outputFile: string): Promise<void> {
+async function downloadAudio(
+  ytDlpPath: string,
+  url: string,
+  outputFile: string,
+  extraArgs?: string[]
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const args = [
       '-x',
@@ -151,6 +160,7 @@ async function downloadAudio(ytDlpPath: string, url: string, outputFile: string)
       '--retries',
       '3',
       '--no-warnings',
+      ...(extraArgs?.length ? extraArgs : []),
       '-o',
       outputFile,
       url,

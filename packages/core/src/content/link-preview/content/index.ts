@@ -237,14 +237,17 @@ export async function fetchLinkContent(
       const title = tweet?.author?.username ? `@${tweet.author.username}` : null
       const description = null
       const siteName = 'X'
-      const transcriptResolution = { text: null, source: null }
+      const transcriptResolution = await resolveTranscriptForLink(url, null, deps, {
+        youtubeTranscriptMode,
+        cacheMode,
+      })
       const transcriptDiagnostics = ensureTranscriptDiagnostics(
         transcriptResolution,
         cacheMode ?? 'default'
       )
       const result = finalizeExtractedLinkContent({
         url,
-        baseContent: text,
+        baseContent: selectBaseContent(text, transcriptResolution.text),
         maxCharacters,
         title,
         description,

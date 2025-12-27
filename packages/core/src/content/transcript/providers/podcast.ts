@@ -198,6 +198,7 @@ export const fetchTranscript = async (
         openaiApiKey: options.openaiApiKey,
         falApiKey: options.falApiKey,
         url: context.url,
+        service: 'podcast',
       })
       if (result.notes.length > 0) notes.push(...result.notes)
       return {

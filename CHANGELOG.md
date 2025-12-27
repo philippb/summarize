@@ -12,11 +12,13 @@
 - Daemon: add `summarize daemon …` (LaunchAgent-backed localhost server on `127.0.0.1:8787`) for extension ↔ CLI integration.
   - Token pairing (shared secret)
   - Streaming over SSE
+  - Emit finish-line metrics over SSE (panel footer + hover details)
   - Commands: `install`, `status`, `restart`, `uninstall`, `run`
+- X/Twitter: auto-transcribe tweet videos via `yt-dlp`, using browser cookies (Safari/Chrome/Firefox) when available.
 
 ### Fixed
 
-- Chrome Side Panel: avoid MV3 background stream stalls by streaming SSE from the panel page; improve auto-summarize de-dupe; keep background theme continuous on long summaries.
+- Chrome Side Panel: avoid MV3 background stream stalls by streaming SSE from the panel page; improve auto-summarize de-dupe; keep background theme continuous on long summaries; harden port reconnect and show a subtle summary metrics footer.
 
 ## 0.7.1 - 2025-12-26
 

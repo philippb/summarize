@@ -38,6 +38,8 @@ export default defineConfig({
         '**/dist/**',
         '**/node_modules/**',
         'tests/**',
+        // OS/browser integration (exec/sqlite/keychain); covered via higher-level tests.
+        '**/src/content/transcript/providers/twitter-cookies-*.ts',
         // Barrels / type-only entrypoints (noise for coverage).
         'src/**/index.ts',
         'src/**/types.ts',
