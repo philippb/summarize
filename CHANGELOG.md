@@ -29,7 +29,7 @@
 - Chrome Side Panel: move “working” status into the header (no layout jump) and show progress as a 1px separator line; allow the subtitle to use full available width.
 - Chrome Side Panel: use the current page title as the header title; show `words/chars` (or media duration + words) + model in the idle subtitle after a run.
 - Daemon: prefer the installed env snapshot over launchd’s minimal environment (fixes missing `yt-dlp` / `whisper.cpp` on PATH, especially for X/Twitter video transcription).
-- X/Twitter: cookie extraction no longer shells out to `sqlite3`; now uses `@steipete/sweet-cookie` (Node/Bun native SQLite).
+- X/Twitter: cookie handling now delegates to `yt-dlp --cookies-from-browser` (no sweet-cookie dependency).
 - Finish line: shorten transcript summaries to include source (`YouTube` / `podcast`) and avoid repeating the label.
 - Transcripts: show yt-dlp download progress bytes instead of staying at 0 B.
 - Transcripts: stabilize yt-dlp download totals to prevent bouncing progress bars.

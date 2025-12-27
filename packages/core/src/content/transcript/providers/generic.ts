@@ -51,9 +51,8 @@ export const fetchTranscript = async (
   if (resolved?.warnings?.length) notes.push(...resolved.warnings)
 
   const extraArgs: string[] = []
-  if (resolved?.cookieHeader && resolved.ct0) {
-    extraArgs.push('--add-header', `Cookie: ${resolved.cookieHeader}`)
-    extraArgs.push('--add-header', `x-csrf-token: ${resolved.ct0}`)
+  if (resolved?.cookiesFromBrowser) {
+    extraArgs.push('--cookies-from-browser', resolved.cookiesFromBrowser)
     if (resolved.source) notes.push(`Using X cookies from ${resolved.source}`)
   }
 

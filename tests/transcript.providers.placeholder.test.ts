@@ -110,8 +110,7 @@ describe('placeholder transcript providers', () => {
       falApiKey: null,
       openaiApiKey: 'sk-test',
       resolveTwitterCookies: async () => ({
-        cookieHeader: 'auth_token=auth; ct0=csrf',
-        ct0: 'csrf',
+        cookiesFromBrowser: 'chrome',
         source: 'env AUTH_TOKEN',
         warnings: [],
       }),
@@ -123,12 +122,7 @@ describe('placeholder transcript providers', () => {
     expect(mocks.fetchTranscriptWithYtDlp).toHaveBeenCalledWith(
       expect.objectContaining({
         service: 'generic',
-        extraArgs: [
-          '--add-header',
-          'Cookie: auth_token=auth; ct0=csrf',
-          '--add-header',
-          'x-csrf-token: csrf',
-        ],
+        extraArgs: ['--cookies-from-browser', 'chrome'],
       })
     )
     expect(result.text).toBe('hello world')

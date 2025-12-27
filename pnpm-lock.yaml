@@ -11,9 +11,6 @@ importers:
       '@steipete/summarize-core':
         specifier: workspace:*
         version: link:packages/core
-      '@steipete/sweet-cookie':
-        specifier: github:steipete/sweet-cookie#path:packages/core
-        version: https://codeload.github.com/steipete/sweet-cookie/tar.gz/78940b2d12b0198e3db6af9db137b06b2bd3b1ea#path:packages/core
     devDependencies:
       '@ai-sdk/anthropic':
         specifier: 3.0.1
@@ -752,16 +749,6 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
-
-  '@steipete/sweet-cookie@https://codeload.github.com/steipete/sweet-cookie/tar.gz/78940b2d12b0198e3db6af9db137b06b2bd3b1ea#path:packages/core':
-    resolution: {path: packages/core, tarball: https://codeload.github.com/steipete/sweet-cookie/tar.gz/78940b2d12b0198e3db6af9db137b06b2bd3b1ea}
-    version: 0.0.0
-    engines: {node: '>=22'}
-    peerDependencies:
-      chrome-cookies-secure: ^3.0.0
-    peerDependenciesMeta:
-      chrome-cookies-secure:
-        optional: true
 
   '@tokenizer/inflate@0.4.1':
     resolution: {integrity: sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA==}
@@ -3083,8 +3070,6 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.1.0': {}
-
-  '@steipete/sweet-cookie@https://codeload.github.com/steipete/sweet-cookie/tar.gz/78940b2d12b0198e3db6af9db137b06b2bd3b1ea#path:packages/core': {}
 
   '@tokenizer/inflate@0.4.1':
     dependencies:

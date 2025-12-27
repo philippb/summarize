@@ -33,9 +33,6 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     setupFiles: ['tests/setup.ts'],
-    deps: {
-      inline: ['@steipete/sweet-cookie'],
-    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'html'],

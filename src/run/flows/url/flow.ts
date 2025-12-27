@@ -126,8 +126,7 @@ export async function runUrlFlow({
     resolveTwitterCookies: async (_args) => {
       const res = await resolveTwitterCookies({ env: ctx.env })
       return {
-        cookieHeader: res.cookies.cookieHeader,
-        ct0: res.cookies.ct0,
+        cookiesFromBrowser: res.cookies.cookiesFromBrowser,
         source: res.cookies.source,
         warnings: res.warnings,
       }

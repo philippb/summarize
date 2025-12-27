@@ -1,9 +1,11 @@
-import type { BrowserName, GetCookiesOptions, GetCookiesResult } from '@steipete/sweet-cookie'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import path from 'node:path'
+
+export type BrowserName = 'chrome' | 'safari' | 'firefox'
 
 export type TwitterCookies = {
-  authToken: string | null
-  ct0: string | null
-  cookieHeader: string | null
+  cookiesFromBrowser: string | null
   source: string | null
 }
 
@@ -13,8 +15,6 @@ export type CookieExtractionResult = {
 }
 
 const DEFAULT_SOURCES: BrowserName[] = ['chrome', 'safari', 'firefox']
-const TWITTER_COOKIE_NAMES = ['auth_token', 'ct0'] as const
-const TWITTER_ORIGINS = ['https://x.com', 'https://twitter.com'] as const
 
 const ENV_COOKIE_SOURCE_KEYS = ['TWITTER_COOKIE_SOURCE'] as const
 const ENV_CHROME_PROFILE_KEYS = ['TWITTER_CHROME_PROFILE'] as const
@@ -73,30 +73,178 @@ function formatBrowserSourceLabel(browser: BrowserName, profile?: string): strin
   return 'Safari'
 }
 
-type GetCookiesFn = (options: GetCookiesOptions) => Promise<GetCookiesResult>
+function buildCookiesFromBrowserSpec(browser: BrowserName, profile?: string): string {
+  if (browser === 'safari' || !profile) return browser
+  return `${browser}:${profile}`
+}
+
+function looksLikePath(value: string): boolean {
+  return value.includes('/') || value.includes('\\')
+}
+
+function expandPath(value: string, homeDir: string): string {
+  if (value.startsWith('~/')) return path.join(homeDir, value.slice(2))
+  return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value)
+}
+
+function safeStat(candidate: string): { isFile: () => boolean; isDirectory: () => boolean } | null {
+  try {
+    return statSync(candidate)
+  } catch {
+    return null
+  }
+}
+
+function resolveChromeCookiesDb(
+  profile: string | undefined,
+  platform: NodeJS.Platform,
+  homeDir: string,
+  env: Record<string, string | undefined>
+): string | null {
+  const roots =
+    platform === 'darwin'
+      ? [path.join(homeDir, 'Library', 'Application Support', 'Google', 'Chrome')]
+      : platform === 'linux'
+        ? [path.join(homeDir, '.config', 'google-chrome')]
+        : platform === 'win32'
+          ? env.LOCALAPPDATA
+            ? [path.join(env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data')]
+            : []
+          : []
+
+  const candidates: string[] = []
+
+  if (profile && looksLikePath(profile)) {
+    const expanded = expandPath(profile, homeDir)
+    const stat = safeStat(expanded)
+    if (stat?.isFile()) return expanded
+    candidates.push(path.join(expanded, 'Cookies'))
+    candidates.push(path.join(expanded, 'Network', 'Cookies'))
+  } else {
+    const profileDir = profile && profile.trim().length > 0 ? profile.trim() : 'Default'
+    for (const root of roots) {
+      candidates.push(path.join(root, profileDir, 'Cookies'))
+      candidates.push(path.join(root, profileDir, 'Network', 'Cookies'))
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+
+  return null
+}
+
+function resolveFirefoxCookiesDb(
+  profile: string | undefined,
+  platform: NodeJS.Platform,
+  homeDir: string,
+  env: Record<string, string | undefined>
+): string | null {
+  const appData = env.APPDATA
+  const roots =
+    platform === 'darwin'
+      ? [path.join(homeDir, 'Library', 'Application Support', 'Firefox', 'Profiles')]
+      : platform === 'linux'
+        ? [path.join(homeDir, '.mozilla', 'firefox')]
+        : platform === 'win32'
+          ? appData
+            ? [path.join(appData, 'Mozilla', 'Firefox', 'Profiles')]
+            : []
+          : []
+
+  if (profile && looksLikePath(profile)) {
+    const expanded = expandPath(profile, homeDir)
+    const candidate = expanded.endsWith('cookies.sqlite')
+      ? expanded
+      : path.join(expanded, 'cookies.sqlite')
+    return existsSync(candidate) ? candidate : null
+  }
+
+  for (const root of roots) {
+    if (!root || !existsSync(root)) continue
+    if (profile) {
+      const candidate = path.join(root, profile, 'cookies.sqlite')
+      if (existsSync(candidate)) return candidate
+      continue
+    }
+
+    const entries = safeReaddir(root)
+    const defaultRelease = entries.find((entry) => entry.includes('default-release'))
+    const picked = defaultRelease ?? entries[0]
+    if (!picked) continue
+    const candidate = path.join(root, picked, 'cookies.sqlite')
+    if (existsSync(candidate)) return candidate
+  }
+
+  return null
+}
+
+function safeReaddir(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  } catch {
+    return []
+  }
+}
+
+function resolveSafariCookiesFile(platform: NodeJS.Platform, homeDir: string): string | null {
+  if (platform !== 'darwin') return null
+  const candidates = [
+    path.join(homeDir, 'Library', 'Cookies', 'Cookies.binarycookies'),
+    path.join(
+      homeDir,
+      'Library',
+      'Containers',
+      'com.apple.Safari',
+      'Data',
+      'Library',
+      'Cookies',
+      'Cookies.binarycookies'
+    ),
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+function hasCookiesStore(
+  browser: BrowserName,
+  profile: string | undefined,
+  platform: NodeJS.Platform,
+  homeDir: string,
+  env: Record<string, string | undefined>
+): boolean {
+  if (browser === 'safari') {
+    return Boolean(resolveSafariCookiesFile(platform, homeDir))
+  }
+  if (browser === 'firefox') {
+    return Boolean(resolveFirefoxCookiesDb(profile, platform, homeDir, env))
+  }
+  return Boolean(resolveChromeCookiesDb(profile, platform, homeDir, env))
+}
 
 export async function resolveTwitterCookies({
   env,
-  authToken,
-  ct0,
   cookieSource,
   chromeProfile,
   firefoxProfile,
-  getCookiesImpl,
+  platform,
+  homeDir,
 }: {
   env: Record<string, string | undefined>
-  authToken?: string
-  ct0?: string
   cookieSource?: BrowserName | BrowserName[]
   chromeProfile?: string
   firefoxProfile?: string
-  getCookiesImpl?: GetCookiesFn
+  platform?: NodeJS.Platform
+  homeDir?: string
 }): Promise<CookieExtractionResult> {
   const warnings: string[] = []
   const cookies: TwitterCookies = {
-    authToken: null,
-    ct0: null,
-    cookieHeader: null,
+    cookiesFromBrowser: null,
     source: null,
   }
 
@@ -108,98 +256,44 @@ export async function resolveTwitterCookies({
   const effectiveChromeProfile = chromeProfile ?? envChromeProfile
   const effectiveFirefoxProfile = firefoxProfile ?? envFirefoxProfile
 
-  if (authToken) {
-    cookies.authToken = authToken
-    cookies.source = 'CLI argument'
-  }
-  if (ct0) {
-    cookies.ct0 = ct0
-    if (!cookies.source) cookies.source = 'CLI argument'
-  }
-
-  const envAuthKeys = ['AUTH_TOKEN', 'TWITTER_AUTH_TOKEN'] as const
-  const envCt0Keys = ['CT0', 'TWITTER_CT0'] as const
-
-  if (!cookies.authToken) {
-    for (const key of envAuthKeys) {
-      const value = normalizeValue(env[key])
-      if (value) {
-        cookies.authToken = value
-        cookies.source = `env ${key}`
-        break
-      }
-    }
-  }
-
-  if (!cookies.ct0) {
-    for (const key of envCt0Keys) {
-      const value = normalizeValue(env[key])
-      if (value) {
-        cookies.ct0 = value
-        if (!cookies.source) cookies.source = `env ${key}`
-        break
-      }
-    }
-  }
-
-  if (cookies.authToken && cookies.ct0) {
-    cookies.cookieHeader = `auth_token=${cookies.authToken}; ct0=${cookies.ct0}`
-    return { cookies, warnings }
-  }
-
   const sourcesToTry: BrowserName[] = Array.isArray(effectiveCookieSource)
     ? effectiveCookieSource
     : effectiveCookieSource
       ? [effectiveCookieSource]
       : DEFAULT_SOURCES
 
-  const getCookiesFn: GetCookiesFn =
-    getCookiesImpl ?? (await import('@steipete/sweet-cookie')).getCookies
+  const runtimePlatform = platform ?? process.platform
+  const runtimeHome = homeDir ?? homedir()
+
+  let firstCandidate: { spec: string; label: string } | null = null
 
   for (const source of sourcesToTry) {
-    const result = await getCookiesFn({
-      url: 'https://x.com',
-      origins: [...TWITTER_ORIGINS],
-      names: [...TWITTER_COOKIE_NAMES],
-      browsers: [source],
-      chromeProfile: effectiveChromeProfile,
-      firefoxProfile: effectiveFirefoxProfile,
-    })
+    const profile =
+      source === 'chrome'
+        ? effectiveChromeProfile
+        : source === 'firefox'
+          ? effectiveFirefoxProfile
+          : undefined
+    const spec = buildCookiesFromBrowserSpec(source, profile)
+    const label = formatBrowserSourceLabel(source, profile)
+    if (!firstCandidate) firstCandidate = { spec, label }
 
-    warnings.push(...result.warnings)
-
-    const auth = result.cookies.find((c) => c.name === 'auth_token')?.value ?? null
-    const csrf = result.cookies.find((c) => c.name === 'ct0')?.value ?? null
-
-    if (auth && csrf) {
-      const browserLabel =
-        source === 'chrome'
-          ? formatBrowserSourceLabel(source, effectiveChromeProfile)
-          : source === 'firefox'
-            ? formatBrowserSourceLabel(source, effectiveFirefoxProfile)
-            : formatBrowserSourceLabel(source)
-      return {
-        cookies: {
-          authToken: auth,
-          ct0: csrf,
-          cookieHeader: `auth_token=${auth}; ct0=${csrf}`,
-          source: browserLabel,
-        },
-        warnings,
-      }
+    if (hasCookiesStore(source, profile, runtimePlatform, runtimeHome, env)) {
+      cookies.cookiesFromBrowser = spec
+      cookies.source = label
+      return { cookies, warnings }
     }
   }
 
-  if (!cookies.authToken) {
-    warnings.push(
-      'Missing auth_token - provide via AUTH_TOKEN env var, or login to x.com in Safari/Chrome/Firefox'
-    )
-  }
-  if (!cookies.ct0) {
-    warnings.push(
-      'Missing ct0 - provide via CT0 env var, or login to x.com in Safari/Chrome/Firefox'
-    )
+  const hasExplicitSources = Boolean(effectiveCookieSource)
+
+  if (hasExplicitSources && firstCandidate) {
+    warnings.push(`No cookie store found for ${firstCandidate.label}. yt-dlp will still attempt it.`)
+    cookies.cookiesFromBrowser = firstCandidate.spec
+    cookies.source = firstCandidate.label
+    return { cookies, warnings }
   }
 
+  warnings.push('No browser cookies found for X/Twitter. Log into x.com in Chrome, Safari, or Firefox.')
   return { cookies, warnings }
 }

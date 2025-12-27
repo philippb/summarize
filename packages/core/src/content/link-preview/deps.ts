@@ -139,14 +139,13 @@ export type ReadTweetWithBird = (args: {
   timeoutMs: number
 }) => Promise<BirdTweetPayload | null>
 
-export type TwitterCookieHeaders = {
-  cookieHeader: string | null
-  ct0: string | null
+export type TwitterCookieSource = {
+  cookiesFromBrowser: string | null
   source?: string | null
   warnings?: string[]
 }
 
-export type ResolveTwitterCookies = (args: { url: string }) => Promise<TwitterCookieHeaders>
+export type ResolveTwitterCookies = (args: { url: string }) => Promise<TwitterCookieSource>
 
 /** Internal dependency bag; prefer createLinkPreviewClient unless you need custom wiring. */
 export interface LinkPreviewDeps {

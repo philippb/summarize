@@ -1,120 +1,132 @@
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
 
 import { resolveTwitterCookies } from '../src/run/cookies/twitter.js'
 
+function makeTempHome(): string {
+  return mkdtempSync(path.join(tmpdir(), 'summarize-twitter-cookies-'))
+}
+
+function touch(filePath: string): void {
+  mkdirSync(path.dirname(filePath), { recursive: true })
+  writeFileSync(filePath, 'x')
+}
+
 describe('twitter cookies resolver (CLI)', () => {
-  it('uses explicit tokens without touching browsers', async () => {
-    const getCookiesImpl = vi.fn(async () => ({ cookies: [], warnings: [] }))
+  it('returns cookies-from-browser when chrome store exists', async () => {
+    const home = makeTempHome()
+    touch(
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome',
+        'Default',
+        'Cookies'
+      )
+    )
 
-    const res = await resolveTwitterCookies({
-      env: {},
-      authToken: 'auth',
-      ct0: 'csrf',
-      getCookiesImpl,
-    })
-    expect(res.cookies.cookieHeader).toBe('auth_token=auth; ct0=csrf')
-    expect(res.cookies.source).toBe('CLI argument')
-    expect(getCookiesImpl).not.toHaveBeenCalled()
+    const res = await resolveTwitterCookies({ env: {}, platform: 'darwin', homeDir: home })
+    expect(res.cookies.cookiesFromBrowser).toBe('chrome')
+    expect(res.cookies.source).toBe('Chrome')
+    expect(res.warnings).toHaveLength(0)
   })
 
-  it('uses env vars without touching browsers', async () => {
-    const getCookiesImpl = vi.fn(async () => ({ cookies: [], warnings: [] }))
-
-    const res = await resolveTwitterCookies({
-      env: { AUTH_TOKEN: 'auth', CT0: 'csrf' },
-      getCookiesImpl,
-    })
-    expect(res.cookies.cookieHeader).toBe('auth_token=auth; ct0=csrf')
-    expect(res.cookies.source).toBe('env AUTH_TOKEN')
-    expect(getCookiesImpl).not.toHaveBeenCalled()
-  })
-
-  it('returns the first browser with both cookies', async () => {
-    const getCookiesImpl = vi.fn(async (options) => {
-      const browser = options.browsers?.[0]
-      if (browser === 'safari') {
-        return {
-          cookies: [
-            { name: 'auth_token', value: 'a' },
-            { name: 'ct0', value: 'c' },
-          ],
-          warnings: [],
-        }
-      }
-      return { cookies: [], warnings: [] }
-    })
-
-    const res = await resolveTwitterCookies({
-      env: {},
-      cookieSource: ['safari', 'chrome', 'firefox'],
-      getCookiesImpl,
-    })
-    expect(res.cookies.source).toBe('Safari')
-    expect(res.cookies.cookieHeader).toBe('auth_token=a; ct0=c')
-    expect(getCookiesImpl).toHaveBeenCalledTimes(1)
-  })
-
-  it('uses cookie source order from env vars', async () => {
-    const getCookiesImpl = vi.fn(async (options) => {
-      const browser = options.browsers?.[0]
-      if (browser !== 'firefox') return { cookies: [], warnings: [] }
-      expect(options.firefoxProfile).toBe('default-release')
-      return {
-        cookies: [
-          { name: 'auth_token', value: 'a' },
-          { name: 'ct0', value: 'c' },
-        ],
-        warnings: [],
-      }
-    })
+  it('uses cookie source order and profile from env', async () => {
+    const home = makeTempHome()
+    touch(
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Firefox',
+        'Profiles',
+        'default-release',
+        'cookies.sqlite'
+      )
+    )
 
     const res = await resolveTwitterCookies({
       env: {
         TWITTER_COOKIE_SOURCE: 'firefox, chrome',
         TWITTER_FIREFOX_PROFILE: 'default-release',
       },
-      getCookiesImpl,
+      platform: 'darwin',
+      homeDir: home,
     })
+    expect(res.cookies.cookiesFromBrowser).toBe('firefox:default-release')
     expect(res.cookies.source).toBe('Firefox (default-release)')
-    expect(getCookiesImpl).toHaveBeenCalledTimes(1)
+    expect(res.warnings).toHaveLength(0)
   })
 
-  it('falls back to the next browser when needed', async () => {
-    const getCookiesImpl = vi.fn(async (options) => {
-      const browser = options.browsers?.[0]
-      if (browser === 'safari') return { cookies: [], warnings: ['nope'] }
-      if (browser === 'chrome') {
-        return {
-          cookies: [
-            { name: 'auth_token', value: 'a' },
-            { name: 'ct0', value: 'c' },
-          ],
-          warnings: [],
-        }
-      }
-      return { cookies: [], warnings: [] }
-    })
+  it('skips missing sources and returns the first available store', async () => {
+    const home = makeTempHome()
+    touch(
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome',
+        'Default',
+        'Cookies'
+      )
+    )
 
     const res = await resolveTwitterCookies({
       env: {},
       cookieSource: ['safari', 'chrome'],
-      getCookiesImpl,
+      platform: 'darwin',
+      homeDir: home,
     })
+    expect(res.cookies.cookiesFromBrowser).toBe('chrome')
     expect(res.cookies.source).toBe('Chrome')
-    expect(res.warnings).toContain('nope')
-    expect(getCookiesImpl).toHaveBeenCalledTimes(2)
   })
 
-  it('returns warnings when no cookies are found', async () => {
-    const getCookiesImpl = vi.fn(async () => ({ cookies: [], warnings: [] }))
+  it('returns explicit source with warning when store is missing', async () => {
+    const home = makeTempHome()
 
     const res = await resolveTwitterCookies({
-      env: {},
-      cookieSource: ['safari'],
-      getCookiesImpl,
+      env: { TWITTER_COOKIE_SOURCE: 'safari' },
+      platform: 'darwin',
+      homeDir: home,
     })
-    expect(res.cookies.cookieHeader).toBeNull()
-    expect(res.warnings.join('\n')).toContain('Missing auth_token')
-    expect(res.warnings.join('\n')).toContain('Missing ct0')
+    expect(res.cookies.cookiesFromBrowser).toBe('safari')
+    expect(res.cookies.source).toBe('Safari')
+    expect(res.warnings.join('\n')).toContain('No cookie store found')
+  })
+
+  it('returns null when no cookie stores are found', async () => {
+    const home = makeTempHome()
+
+    const res = await resolveTwitterCookies({ env: {}, platform: 'darwin', homeDir: home })
+    expect(res.cookies.cookiesFromBrowser).toBeNull()
+    expect(res.warnings.join('\n')).toContain('No browser cookies found')
+  })
+
+  it('warns about unknown cookie source tokens', async () => {
+    const home = makeTempHome()
+    touch(
+      path.join(
+        home,
+        'Library',
+        'Application Support',
+        'Google',
+        'Chrome',
+        'Default',
+        'Cookies'
+      )
+    )
+
+    const res = await resolveTwitterCookies({
+      env: { TWITTER_COOKIE_SOURCE: 'chrome, foo' },
+      platform: 'darwin',
+      homeDir: home,
+    })
+    expect(res.warnings.join('\n')).toContain('Unknown cookie source "foo"')
+    expect(res.cookies.cookiesFromBrowser).toBe('chrome')
   })
 })
