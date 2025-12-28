@@ -61,14 +61,22 @@ function CheckboxField({
   onCheckedChange: (checked: boolean) => void
 }) {
   const api = useZagCheckbox({ id, checked, disabled, onCheckedChange })
+  const rootProps = api.getRootProps()
+  const controlProps = api.getControlProps()
+  const indicatorProps = api.getIndicatorProps()
+  const labelProps = api.getLabelProps()
+  const { className: rootClassName, ...rootRest } = rootProps
+  const { className: controlClassName, ...controlRest } = controlProps
+  const { className: indicatorClassName, ...indicatorRest } = indicatorProps
+  const { className: labelClassName, ...labelRest } = labelProps
   return (
-    <label className="checkboxRoot" {...api.getRootProps()}>
-      <span className="checkboxControl" {...api.getControlProps()}>
-        <span className="checkboxIndicator" {...api.getIndicatorProps()}>
+    <label className={`checkboxRoot ${rootClassName ?? ''}`.trim()} {...rootRest}>
+      <span className={`checkboxControl ${controlClassName ?? ''}`.trim()} {...controlRest}>
+        <span className={`checkboxIndicator ${indicatorClassName ?? ''}`.trim()} {...indicatorRest}>
           <Checkmark />
         </span>
       </span>
-      <span className="checkboxLabel" {...api.getLabelProps()}>
+      <span className={`checkboxLabel ${labelClassName ?? ''}`.trim()} {...labelRest}>
         {label}
       </span>
       <input {...api.getHiddenInputProps()} />
