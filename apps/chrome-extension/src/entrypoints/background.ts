@@ -239,7 +239,7 @@ export default defineBackground(() => {
     if (!isPanelOpen()) return
 
     const settings = await loadSettings()
-    if (reason !== 'manual' && !settings.autoSummarize) return
+    if (reason !== 'manual' && reason !== 'length-change' && !settings.autoSummarize) return
     if (!settings.token.trim()) {
       await emitState('Setup required (missing token)')
       return
@@ -268,7 +268,8 @@ export default defineBackground(() => {
     if (
       settings.autoSummarize &&
       (lastSummarizedUrl === extracted.url || inflightUrl === extracted.url) &&
-      reason !== 'manual'
+      reason !== 'manual' &&
+      reason !== 'length-change'
     ) {
       sendStatus('')
       return
@@ -352,6 +353,7 @@ export default defineBackground(() => {
         void (async () => {
           await patchSettings({ length: (msg as { value: string }).value })
           void emitState('')
+          void summarizeActiveTab('length-change')
         })()
         break
       case 'panel:openOptions':
