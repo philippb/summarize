@@ -315,7 +315,7 @@ describe('llm generate/stream', () => {
     ).rejects.toThrow(/ANTHROPIC_API_KEY/i)
   })
 
-  it('respects OPENAI_BASE_URL and skips OpenRouter headers for non-OpenRouter base URLs', async () => {
+  it('uses chat completions for custom OPENAI_BASE_URL and skips OpenRouter headers', async () => {
     process.env.OPENAI_BASE_URL = 'https://openai.example.com/v1'
     mocks.completeSimple.mockClear()
 
@@ -335,7 +335,7 @@ describe('llm generate/stream', () => {
 
     const model = mocks.completeSimple.mock.calls[0]?.[0] as { baseUrl?: string; api?: string }
     expect(model.baseUrl).toBe('https://openai.example.com/v1')
-    expect(model.api).toBe('openai-responses')
+    expect(model.api).toBe('openai-completions')
 
     const headers = (
       mocks.completeSimple.mock.calls[0]?.[0] as { headers?: Record<string, string> }

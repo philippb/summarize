@@ -143,7 +143,17 @@ function resolveOpenAiClientConfig({
     ? 'https://openrouter.ai/api/v1'
     : (baseUrl ?? (isOpenRouter ? 'https://openrouter.ai/api/v1' : undefined))
 
-  const useChatCompletions = Boolean(forceChatCompletions) || isOpenRouter
+  const isCustomBaseURL = (() => {
+    if (!baseURL) return false
+    try {
+      const url = new URL(baseURL)
+      return url.host !== 'api.openai.com' && url.host !== 'openrouter.ai'
+    } catch {
+      return false
+    }
+  })()
+
+  const useChatCompletions = Boolean(forceChatCompletions) || isOpenRouter || isCustomBaseURL
   return {
     apiKey,
     baseURL: baseURL ?? undefined,
