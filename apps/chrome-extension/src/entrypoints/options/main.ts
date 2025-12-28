@@ -27,6 +27,7 @@ const pickersRoot = byId<HTMLDivElement>('pickersRoot')
 const fontFamilyEl = byId<HTMLInputElement>('fontFamily')
 const fontSizeEl = byId<HTMLInputElement>('fontSize')
 const buildInfoEl = document.getElementById('buildInfo')
+const daemonStatusEl = byId<HTMLDivElement>('daemonStatus')
 
 const setStatus = (text: string) => {
   statusEl.textContent = text
@@ -44,6 +45,77 @@ const setBuildInfo = () => {
   if (hash && hash !== 'unknown') parts.push(hash)
   buildInfoEl.textContent = parts.join(' · ')
   buildInfoEl.toggleAttribute('hidden', parts.length === 0)
+}
+
+const resolveExtensionVersion = () => {
+  const injected =
+    typeof __SUMMARIZE_VERSION__ === 'string' && __SUMMARIZE_VERSION__
+      ? __SUMMARIZE_VERSION__
+      : ''
+  return injected || chrome?.runtime?.getManifest?.().version || ''
+}
+
+const setDaemonStatus = (text: string, state?: 'ok' | 'warn' | 'error') => {
+  daemonStatusEl.textContent = text
+  if (state) {
+    daemonStatusEl.dataset.state = state
+  } else {
+    delete daemonStatusEl.dataset.state
+  }
+}
+
+let daemonCheckId = 0
+async function checkDaemonStatus(token: string) {
+  const checkId = (daemonCheckId += 1)
+  setDaemonStatus('Checking daemon…')
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 1500)
+  try {
+    const res = await fetch('http://127.0.0.1:8787/health', { signal: controller.signal })
+    window.clearTimeout(timeout)
+    if (checkId !== daemonCheckId) return
+    if (!res.ok) {
+      setDaemonStatus(`Daemon error (${res.status} ${res.statusText})`, 'error')
+      return
+    }
+    const json = (await res.json()) as { version?: unknown }
+    const daemonVersion = typeof json.version === 'string' ? json.version.trim() : ''
+    const extVersion = resolveExtensionVersion()
+    const versionNote = daemonVersion ? `v${daemonVersion}` : 'version unknown'
+
+    if (token.trim()) {
+      try {
+        const ping = await fetch('http://127.0.0.1:8787/v1/ping', {
+          signal: controller.signal,
+          headers: { Authorization: `Bearer ${token.trim()}` },
+        })
+        if (checkId !== daemonCheckId) return
+        if (!ping.ok) {
+          setDaemonStatus(`Daemon ${versionNote} (token mismatch)`, 'warn')
+          return
+        }
+      } catch {
+        if (checkId !== daemonCheckId) return
+        setDaemonStatus(`Daemon ${versionNote} (auth failed)`, 'warn')
+        return
+      }
+    } else {
+      setDaemonStatus(`Daemon ${versionNote} (add token to verify)`, 'warn')
+      return
+    }
+
+    if (daemonVersion && extVersion && daemonVersion !== extVersion) {
+      setDaemonStatus(`Daemon ${versionNote} (extension v${extVersion})`, 'warn')
+      return
+    }
+
+    setDaemonStatus(`Daemon ${versionNote} connected`, 'ok')
+  } catch {
+    window.clearTimeout(timeout)
+    if (checkId !== daemonCheckId) return
+    setDaemonStatus('Daemon unreachable', 'error')
+  }
 }
 
 function setDefaultModelPresets() {
@@ -217,6 +289,7 @@ const pickers = mountOptionsPickers(pickersRoot, {
 async function load() {
   const s = await loadSettings()
   tokenEl.value = s.token
+  void checkDaemonStatus(s.token)
   await refreshModelPresets(s.token)
   setModelValue(s.model)
   {
@@ -241,6 +314,7 @@ tokenEl.addEventListener('input', () => {
   window.clearTimeout(refreshTimer)
   refreshTimer = window.setTimeout(() => {
     void refreshModelPresets(tokenEl.value)
+    void checkDaemonStatus(tokenEl.value)
   }, 350)
 })
 
