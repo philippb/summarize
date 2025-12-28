@@ -598,6 +598,12 @@ button.ghost:hover {
   gap: 6px;
   color: var(--muted);
   font-size: 11px;
+  position: relative;
+  z-index: 0;
+}
+
+.drawer label:has(.picker[data-state="open"]) {
+  z-index: 8;
 }
 
 .drawer label.toggleRow {
@@ -684,7 +690,7 @@ select {
 }
 
 .picker[data-state="open"] {
-  z-index: 2;
+  z-index: 6;
 }
 
 .pickerTrigger {
@@ -696,6 +702,7 @@ select {
   border-radius: 12px;
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   font: inherit;
   cursor: pointer;
@@ -730,7 +737,7 @@ select {
 
 .pickerPositioner {
   position: absolute;
-  z-index: 20;
+  z-index: 50;
   top: calc(100% + 6px);
   left: 0;
   right: 0;
@@ -738,13 +745,14 @@ select {
 }
 
 .pickerContent {
-  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  background: rgba(20, 26, 36, 0.72);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 6px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .pickerContent[hidden] {
@@ -817,6 +825,13 @@ select {
 .pickerTrigger .scheme-chips span {
   width: 6px;
   height: 6px;
+}
+
+.pickerHidden {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .scheme-slate {
