@@ -6,7 +6,7 @@
 
 - ESM-only: `@steipete/summarize` + `@steipete/summarize-core` no longer support CommonJS `require()`; the CLI binary is now ESM.
 
-### Features
+### Highlights
 
 - Chrome: add a real **Side Panel** extension (MV3) that summarizes the **current tab** and renders streamed Markdown.
 - Daemon: add `summarize daemon …` (localhost server on `127.0.0.1:8787`) for extension ↔ CLI integration.
@@ -16,27 +16,31 @@
   - Emit finish-line metrics over SSE (panel footer + hover details)
   - Commands: `install`, `status`, `restart`, `uninstall`, `run`
 - Cache: add SQLite cache for transcripts/extractions/summaries with `--no-cache`, `--cache-stats`, `--clear-cache` + config (`cache.enabled/maxMb/ttlDays/path`).
+  - Finish line shows “Cached” for summary cache hits (CLI + daemon/extension)
+  - Daemon/Chrome stream cache status metadata (`summaryFromCache`)
+
+### Features
+
 - YouTube: add `--youtube no-auto` to skip auto-generated captions and prefer creator-uploaded captions; fall back to `yt-dlp` transcription (thanks @dougvk!).
 - CLI: add transcript → Markdown formatting via `--extract --format md --markdown-mode llm` (thanks @dougvk!).
 - X/Twitter: auto-transcribe tweet videos via `yt-dlp`, using browser cookies (Chrome → Safari → Firefox) when available; set `TWITTER_COOKIE_SOURCE` / `TWITTER_*_PROFILE` to control cookie extraction order.
 - Prompt overrides: add `--prompt`, `--prompt-file`, and config `prompt` to replace the default summary instructions.
 - Chrome Side Panel: add length + language controls (presets + custom), forwarded to the daemon.
 - Daemon API: `mode: "auto"` accepts both `url` + extracted page `text`; daemon picks the best pipeline (YouTube/podcasts/media → URL, otherwise prefer visible page text) with a fallback attempt.
-- Daemon/Chrome: stream extra run metadata (`inputSummary`, `modelLabel`, `summaryFromCache`) over SSE for richer panel status.
+- Daemon/Chrome: stream extra run metadata (`inputSummary`, `modelLabel`) over SSE for richer panel status.
 - Core: expose lightweight URL helpers at `@steipete/summarize-core/content/url` (YouTube/Twitter/podcast/direct-media detection).
 - Chrome Side Panel: new icon + extension `homepage_url` set to `summarize.sh`.
 - Providers: add configurable API base URLs (config + env) for OpenAI/Anthropic/Google/xAI (thanks @bunchjesse for the nudge).
 
-### Fixed
+### Improvements
 
 - Chrome Side Panel: stream SSE from the panel (no MV3 background stalls), use runtime messaging to avoid “disconnected port” errors, and improve auto-summarize de-dupe.
 - Chrome Side Panel UI: working status in header + 1px progress line (no layout jump), full-width subtitle, page title in header, idle subtitle shows `words/chars` (or media duration + words) + model, subtle metrics footer, continuous background, and native highlight/link accents.
-- Daemon: prefer the installed env snapshot over launchd’s minimal environment (fixes missing `yt-dlp` / `whisper.cpp` on PATH, especially for X/Twitter video transcription).
+- Daemon: prefer the installed env snapshot over launchd’s minimal environment (improves `yt-dlp` / `whisper.cpp` PATH reliability, especially for X/Twitter video transcription).
 - X/Twitter: cookie handling now delegates to `yt-dlp --cookies-from-browser` (no sweet-cookie dependency).
 - X/Twitter: skip yt-dlp transcript attempts for long-form tweet text (articles).
 - Transcripts: show yt-dlp download progress bytes and stabilize totals to prevent bouncing progress bars.
 - Finish line: show transcript source labels (`YouTube` / `podcast`) without repeating the label.
-- Finish line: show “Cached” instead of `0.0s` when summaries are served from cache (CLI + daemon/extension).
 - Streaming: stop/clear progress UI before first streamed output and avoid leading blank lines on non-TTY stdout.
 - URL flow: propagate `extracted.truncated` into the prompt context so summaries can reflect partial inputs.
 - Daemon: unify URL/page summarization with the CLI flows (single code path; keeps extract/cache/model logic in sync).
