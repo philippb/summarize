@@ -80,6 +80,7 @@ let rememberedUrl = false
 let streaming = false
 let progressTimer = 0
 let showProgress = false
+let summaryFromCache: boolean | null = null
 let baseTitle = 'Summarize'
 let baseSubtitle = ''
 let statusText = ''
@@ -105,7 +106,7 @@ function setStatus(text: string) {
   statusText = text
   if (streaming) {
     const split = splitStatusPercent(text)
-    if (split.percent) {
+    if (split.percent && summaryFromCache !== true) {
       showProgress = true
       if (progressTimer) {
         clearTimeout(progressTimer)
@@ -155,6 +156,7 @@ function updateHeader() {
 }
 
 function armProgress() {
+  if (summaryFromCache === true) return
   showProgress = false
   if (progressTimer) clearTimeout(progressTimer)
   progressTimer = window.setTimeout(() => {
@@ -696,6 +698,8 @@ async function startStream(run: RunStart) {
   streamedAnyNonWhitespace = false
   rememberedUrl = false
   currentSource = { url: run.url, title: run.title }
+  summaryFromCache = null
+  stopProgress()
 
   markdown = ''
   renderEl.innerHTML = ''
@@ -741,12 +745,21 @@ async function startStream(run: RunStart) {
           model?: string | null
           modelLabel?: string | null
           inputSummary?: string | null
+          summaryFromCache?: boolean | null
         }
         lastMeta = {
           model: typeof data.model === 'string' ? data.model : lastMeta.model,
           modelLabel: typeof data.modelLabel === 'string' ? data.modelLabel : lastMeta.modelLabel,
           inputSummary:
             typeof data.inputSummary === 'string' ? data.inputSummary : lastMeta.inputSummary,
+        }
+        if (typeof data.summaryFromCache === 'boolean') {
+          summaryFromCache = data.summaryFromCache
+          if (summaryFromCache) {
+            stopProgress()
+          } else if (streaming && !showProgress) {
+            armProgress()
+          }
         }
         setBaseSubtitle(
           buildIdleSubtitle({

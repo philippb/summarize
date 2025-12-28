@@ -27,7 +27,7 @@ export type StreamSink = {
   writeChunk: (text: string) => void
   onModelChosen: (modelId: string) => void
   writeStatus?: ((text: string) => void) | null
-  writeMeta?: ((data: { inputSummary: string | null }) => void) | null
+  writeMeta?: ((data: { inputSummary?: string | null; summaryFromCache?: boolean | null }) => void) | null
 }
 
 export type VisiblePageMetrics = {
@@ -183,6 +183,7 @@ export async function streamSummaryForVisiblePage({
       },
       onSummaryCached: (cached) => {
         summaryFromCache = cached
+        sink.writeMeta?.({ summaryFromCache: cached })
       },
     },
     runStartedAtMs: startedAt,
@@ -336,6 +337,7 @@ export async function streamSummaryForUrl({
       },
       onSummaryCached: (cached) => {
         summaryFromCache = cached
+        sink.writeMeta?.({ summaryFromCache: cached })
       },
     },
     runStartedAtMs: startedAt,

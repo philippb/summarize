@@ -12,7 +12,12 @@ import { streamSummaryForUrl, streamSummaryForVisiblePage } from './summarize.js
 type SessionEvent =
   | {
       event: 'meta'
-      data: { model: string | null; modelLabel: string | null; inputSummary: string | null }
+      data: {
+        model: string | null
+        modelLabel: string | null
+        inputSummary: string | null
+        summaryFromCache?: boolean | null
+      }
     }
   | { event: 'status'; data: { text: string } }
   | { event: 'chunk'; data: { text: string } }
@@ -35,7 +40,12 @@ type Session = {
   buffer: string[]
   done: boolean
   clients: Set<http.ServerResponse>
-  lastMeta: { model: string | null; modelLabel: string | null; inputSummary: string | null }
+  lastMeta: {
+    model: string | null
+    modelLabel: string | null
+    inputSummary: string | null
+    summaryFromCache: boolean | null
+  }
 }
 
 function json(
@@ -121,7 +131,7 @@ function createSession(): Session {
     buffer: [],
     done: false,
     clients: new Set(),
-    lastMeta: { model: null, modelLabel: null, inputSummary: null },
+    lastMeta: { model: null, modelLabel: null, inputSummary: null, summaryFromCache: null },
   }
 }
 
@@ -141,13 +151,19 @@ function pushToSession(session: Session, evt: SessionEvent) {
 
 function emitMeta(
   session: Session,
-  patch: Partial<{ model: string | null; modelLabel: string | null; inputSummary: string | null }>
+  patch: Partial<{
+    model: string | null
+    modelLabel: string | null
+    inputSummary: string | null
+    summaryFromCache: boolean | null
+  }>
 ) {
   const next = { ...session.lastMeta, ...patch }
   if (
     next.model === session.lastMeta.model &&
     next.modelLabel === session.lastMeta.modelLabel &&
-    next.inputSummary === session.lastMeta.inputSummary
+    next.inputSummary === session.lastMeta.inputSummary &&
+    next.summaryFromCache === session.lastMeta.summaryFromCache
   ) {
     return
   }
@@ -291,8 +307,15 @@ export async function runDaemonServer({
                 if (!clean) return
                 pushToSession(session, { event: 'status', data: { text: clean } })
               },
-              writeMeta: (data: { inputSummary: string | null }) => {
-                emitMeta(session, { inputSummary: data.inputSummary ?? null })
+              writeMeta: (data: {
+                inputSummary?: string | null
+                summaryFromCache?: boolean | null
+              }) => {
+                emitMeta(session, {
+                  inputSummary: typeof data.inputSummary === 'string' ? data.inputSummary : null,
+                  summaryFromCache:
+                    typeof data.summaryFromCache === 'boolean' ? data.summaryFromCache : null,
+                })
               },
             }
 
