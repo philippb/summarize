@@ -647,6 +647,7 @@ label.length.mini {
 
 label.length.mini .combo {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   width: 100%;
 }
@@ -662,7 +663,8 @@ label.length.mini .pickerTrigger {
 }
 
 label.length.mini input[type="text"] {
-  width: 104px;
+  flex: 1 0 100%;
+  width: 100%;
 }
 
 .drawer .combo {
