@@ -204,30 +204,42 @@ function LengthField({
       <span className="pickerTitle">Length</span>
       <div className="combo">
         <div className="picker" {...api.getRootProps()}>
-          <button className="pickerTrigger" {...api.getTriggerProps()}>
-            <span>{api.valueAsString || 'Length'}</span>
-          </button>
+          {presetValue === 'custom' ? (
+            <div className="lengthCustomRow">
+              <input
+                ref={inputRef}
+                id="lengthCustom"
+                type="text"
+                placeholder="Custom (e.g. 20k)"
+                autocapitalize="off"
+                autocomplete="off"
+                spellcheck="false"
+                value={customValue}
+                onInput={(event) => setCustomValue(event.currentTarget.value)}
+                onBlur={commitCustom}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    api.setOpen(true)
+                    return
+                  }
+                  if (event.key !== 'Enter') return
+                  event.preventDefault()
+                  commitCustom()
+                }}
+              />
+              <button className="pickerTrigger presetsTrigger" {...api.getTriggerProps()}>
+                Presets
+              </button>
+            </div>
+          ) : (
+            <button className="pickerTrigger" {...api.getTriggerProps()}>
+              <span>{api.valueAsString || 'Length'}</span>
+            </button>
+          )}
           {portalRoot ? createPortal(content, portalRoot) : content}
           <select className="pickerHidden" {...api.getHiddenSelectProps()} />
         </div>
-        <input
-          ref={inputRef}
-          id="lengthCustom"
-          type="text"
-          placeholder="Custom (e.g. 20k)"
-          autocapitalize="off"
-          autocomplete="off"
-          spellcheck="false"
-          hidden={presetValue !== 'custom'}
-          value={customValue}
-          onInput={(event) => setCustomValue(event.currentTarget.value)}
-          onBlur={commitCustom}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            commitCustom()
-          }}
-        />
       </div>
     </label>
   )

@@ -646,16 +646,10 @@ label.length.mini {
 }
 
 label.length.mini .combo {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 120px);
+  display: block;
   gap: 8px;
   width: 100%;
   align-items: center;
-}
-
-label.length.mini .picker {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 label.length.mini .pickerTrigger {
@@ -663,9 +657,21 @@ label.length.mini .pickerTrigger {
   min-width: 92px;
 }
 
-label.length.mini input[type="text"] {
+label.length.mini .lengthCustomRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+label.length.mini .lengthCustomRow input[type="text"] {
   width: 100%;
   min-width: 0;
+}
+
+label.length.mini .presetsTrigger {
+  width: auto;
+  min-width: 92px;
 }
 
 .drawer .combo {
