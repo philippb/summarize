@@ -40,6 +40,30 @@ type ExtractResponse =
   | { ok: true; url: string; title: string | null; text: string; truncated: boolean }
   | { ok: false; error: string }
 
+const optionsWindowSize = { width: 900, height: 980 }
+const optionsWindowMin = { width: 760, height: 820 }
+const optionsWindowMargin = 20
+
+async function openOptionsWindow() {
+  const url = chrome.runtime.getURL('options/index.html')
+  try {
+    if (chrome.windows?.create) {
+      const current = await chrome.windows.getCurrent()
+      const maxWidth = current.width ? Math.max(optionsWindowMin.width, current.width - optionsWindowMargin) : null
+      const maxHeight = current.height
+        ? Math.max(optionsWindowMin.height, current.height - optionsWindowMargin)
+        : null
+      const width = maxWidth ? Math.min(optionsWindowSize.width, maxWidth) : optionsWindowSize.width
+      const height = maxHeight ? Math.min(optionsWindowSize.height, maxHeight) : optionsWindowSize.height
+      await chrome.windows.create({ url, type: 'popup', width, height })
+      return
+    }
+  } catch {
+    // ignore and fall back
+  }
+  void chrome.runtime.openOptionsPage()
+}
+
 function canSummarizeUrl(url: string | undefined): url is string {
   if (!url) return false
   if (url.startsWith('chrome://')) return false
@@ -322,7 +346,7 @@ export default defineBackground(() => {
         })()
         break
       case 'panel:openOptions':
-        void chrome.runtime.openOptionsPage()
+        void openOptionsWindow()
         break
     }
 

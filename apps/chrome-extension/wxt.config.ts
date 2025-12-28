@@ -23,7 +23,7 @@ export default defineConfig({
       48: 'assets/icon-48.png',
       128: 'assets/icon-128.png',
     },
-    permissions: ['tabs', 'activeTab', 'storage', 'sidePanel', 'webNavigation', 'scripting'],
+    permissions: ['tabs', 'activeTab', 'storage', 'sidePanel', 'webNavigation', 'scripting', 'windows'],
     host_permissions: ['<all_urls>', 'http://127.0.0.1:8787/*'],
     background: {
       type: 'module',
