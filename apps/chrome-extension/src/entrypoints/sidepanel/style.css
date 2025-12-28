@@ -604,6 +604,11 @@ button.ghost:hover {
   grid-column: 1 / -1;
 }
 
+.drawerGrid .summarizeAction {
+  width: 100%;
+  justify-self: start;
+}
+
 .drawer label {
   display: grid;
   gap: 6px;
