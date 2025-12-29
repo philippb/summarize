@@ -68,7 +68,7 @@ function ensureStyle() {
 
     #${TOOLTIP_ID} .summary {
       display: -webkit-box;
-      -webkit-line-clamp: 2;
+      -webkit-line-clamp: 5;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
@@ -263,7 +263,7 @@ export default defineContentScript({
             model,
             length: 'short',
             language,
-            prompt: 'Summarize the linked page in 1-2 concise lines.',
+            prompt: 'Summarize the linked page concisely. Best effort to keep it short.',
             mode: 'url',
             maxCharacters: settings.maxChars,
           }),

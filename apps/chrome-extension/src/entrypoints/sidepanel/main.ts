@@ -406,17 +406,22 @@ const hoverToggle = mountCheckbox(hoverToggleRoot, {
   onCheckedChange: (checked) => {
     hoverSummariesValue = checked
     void patchSettings({ hoverSummaries: checked })
-    hoverToggle.update({
-      id: 'sidepanel-hover',
-      label: 'Hover summaries',
-      checked: hoverSummariesValue,
-      onCheckedChange: (nextChecked) => {
-        hoverSummariesValue = nextChecked
-        void patchSettings({ hoverSummaries: nextChecked })
-      },
-    })
+    syncHoverToggle()
   },
 })
+
+function syncHoverToggle() {
+  hoverToggle.update({
+    id: 'sidepanel-hover',
+    label: 'Hover summaries',
+    checked: hoverSummariesValue,
+    onCheckedChange: (checked) => {
+      hoverSummariesValue = checked
+      void patchSettings({ hoverSummaries: checked })
+      syncHoverToggle()
+    },
+  })
+}
 
 type PlatformKind = 'mac' | 'windows' | 'linux' | 'other'
 
@@ -719,6 +724,8 @@ function updateControls(state: UiState) {
       send({ type: 'panel:setAuto', value: checked })
     },
   })
+  hoverSummariesValue = state.settings.hoverSummaries
+  syncHoverToggle()
   if (pickerSettings.length !== state.settings.length) {
     pickerSettings = { ...pickerSettings, length: state.settings.length }
     lengthPicker.update({

@@ -31,7 +31,13 @@ type UiState = {
   panelOpen: boolean
   daemon: { ok: boolean; authed: boolean; error?: string }
   tab: { url: string | null; title: string | null }
-  settings: { autoSummarize: boolean; model: string; length: string; tokenPresent: boolean }
+  settings: {
+    autoSummarize: boolean
+    hoverSummaries: boolean
+    model: string
+    length: string
+    tokenPresent: boolean
+  }
   status: string
 }
 
@@ -226,6 +232,7 @@ export default defineBackground(() => {
       tab: { url: tab?.url ?? null, title: tab?.title ?? null },
       settings: {
         autoSummarize: settings.autoSummarize,
+        hoverSummaries: settings.hoverSummaries,
         model: settings.model,
         length: settings.length,
         tokenPresent: Boolean(settings.token.trim()),

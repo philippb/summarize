@@ -2,7 +2,13 @@ export type UiState = {
   panelOpen: boolean
   daemon: { ok: boolean; authed: boolean; error?: string }
   tab: { url: string | null; title: string | null }
-  settings: { autoSummarize: boolean; model: string; length: string; tokenPresent: boolean }
+  settings: {
+    autoSummarize: boolean
+    hoverSummaries: boolean
+    model: string
+    length: string
+    tokenPresent: boolean
+  }
   status: string
 }
 
