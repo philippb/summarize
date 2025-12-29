@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { generateTextWithModelId } from '../../src/llm/generate-text.js'
-import { buildDocumentPrompt } from '../../src/llm/prompt.js'
 
 const LIVE = process.env.SUMMARIZE_LIVE_TEST === '1'
 
@@ -73,14 +72,17 @@ function buildMinimalPdf(text: string): Uint8Array {
             anthropicApiKey: null,
             openrouterApiKey: null,
           },
-          prompt: buildDocumentPrompt({
-            text: 'Summarize the attached PDF in one sentence.',
-            document: {
-              bytes: pdfBytes,
-              mediaType: 'application/pdf',
-              filename: 'hello.pdf',
-            },
-          }),
+          prompt: {
+            userText: 'Summarize the attached PDF in one sentence.',
+            attachments: [
+              {
+                kind: 'document',
+                bytes: pdfBytes,
+                mediaType: 'application/pdf',
+                filename: 'hello.pdf',
+              },
+            ],
+          },
           maxOutputTokens: 256,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),

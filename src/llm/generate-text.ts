@@ -22,7 +22,7 @@ import {
 } from './providers/openai.js'
 import type { OpenAiClientConfig } from './providers/types.js'
 import { extractText } from './providers/shared.js'
-import { isDocumentPrompt, type PromptPayload } from './prompt.js'
+import { type Prompt, userTextAndImageMessage } from './prompt.js'
 import type { LlmTokenUsage } from './types.js'
 import { normalizeTokenUsage } from './usage.js'
 
@@ -47,20 +47,29 @@ type RetryNotice = {
   error: unknown
 }
 
-function promptToContext({ system, prompt }: { system?: string; prompt: PromptPayload }): Context {
-  if (isDocumentPrompt(prompt)) {
+function promptToContext(prompt: Prompt): Context {
+  const attachments = prompt.attachments ?? []
+  if (attachments.some((attachment) => attachment.kind === 'document')) {
     throw new Error('Internal error: document prompt cannot be converted to context.')
   }
-  const messages: Message[] =
-    typeof prompt === 'string'
-      ? [{ role: 'user', content: prompt, timestamp: Date.now() }]
-      : prompt.map((msg) =>
-          typeof (msg as { timestamp?: unknown }).timestamp === 'number'
-            ? msg
-            : ({ ...msg, timestamp: Date.now() } as Message)
-        )
-
-  return { systemPrompt: system, messages }
+  if (attachments.length === 0) {
+    return {
+      systemPrompt: prompt.system,
+      messages: [{ role: 'user', content: prompt.userText, timestamp: Date.now() }],
+    }
+  }
+  if (attachments.length !== 1 || attachments[0]?.kind !== 'image') {
+    throw new Error('Internal error: only single image attachments are supported for prompts.')
+  }
+  const attachment = attachments[0]
+  const messages: Message[] = [
+    userTextAndImageMessage({
+      text: prompt.userText,
+      imageBytes: attachment.bytes,
+      mimeType: attachment.mediaType,
+    }),
+  ]
+  return { systemPrompt: prompt.system, messages }
 }
 
 function isRetryableTimeoutError(error: unknown): boolean {
@@ -89,7 +98,6 @@ function sleep(ms: number): Promise<void> {
 export async function generateTextWithModelId({
   modelId,
   apiKeys,
-  system,
   prompt,
   temperature,
   maxOutputTokens,
@@ -106,8 +114,7 @@ export async function generateTextWithModelId({
 }: {
   modelId: string
   apiKeys: LlmApiKeys
-  system?: string
-  prompt: PromptPayload
+  prompt: Prompt
   temperature?: number
   maxOutputTokens?: number
   timeoutMs: number
@@ -133,7 +140,13 @@ export async function generateTextWithModelId({
       ? temperature
       : undefined
 
-  if (isDocumentPrompt(prompt)) {
+  const attachments = prompt.attachments ?? []
+  const documentAttachment = attachments.find((attachment) => attachment.kind === 'document') ?? null
+
+  if (documentAttachment) {
+    if (attachments.length !== 1) {
+      throw new Error('Internal error: document attachments cannot be combined with other inputs.')
+    }
     if (parsed.provider === 'anthropic') {
       const apiKey = apiKeys.anthropicApiKey
       if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY for anthropic/... model')
@@ -141,8 +154,9 @@ export async function generateTextWithModelId({
         const result = await completeAnthropicDocument({
           modelId: parsed.model,
           apiKey,
-          prompt,
-          system,
+          promptText: prompt.userText,
+          document: documentAttachment,
+          system: prompt.system,
           maxOutputTokens,
           timeoutMs,
           fetchImpl,
@@ -174,7 +188,8 @@ export async function generateTextWithModelId({
       const result = await completeOpenAiDocument({
         modelId: parsed.model,
         openaiConfig,
-        prompt,
+        promptText: prompt.userText,
+        document: documentAttachment,
         maxOutputTokens,
         temperature: effectiveTemperature,
         timeoutMs,
@@ -197,7 +212,8 @@ export async function generateTextWithModelId({
       const result = await completeGoogleDocument({
         modelId: parsed.model,
         apiKey,
-        prompt,
+        promptText: prompt.userText,
+        document: documentAttachment,
         maxOutputTokens,
         temperature: effectiveTemperature,
         timeoutMs,
@@ -217,7 +233,7 @@ export async function generateTextWithModelId({
     )
   }
 
-  const context = promptToContext({ system, prompt })
+  const context = promptToContext(prompt)
   const openaiConfig: OpenAiClientConfig | null =
     parsed.provider === 'openai'
       ? resolveOpenAiClientConfig({
@@ -378,7 +394,6 @@ export async function generateTextWithModelId({
 export async function streamTextWithModelId({
   modelId,
   apiKeys,
-  system,
   prompt,
   temperature,
   maxOutputTokens,
@@ -393,8 +408,7 @@ export async function streamTextWithModelId({
 }: {
   modelId: string
   apiKeys: LlmApiKeys
-  system?: string
-  prompt: PromptPayload
+  prompt: Prompt
   temperature?: number
   maxOutputTokens?: number
   timeoutMs: number
@@ -413,13 +427,14 @@ export async function streamTextWithModelId({
   lastError: () => unknown
 }> {
   const parsed = parseGatewayStyleModelId(modelId)
-  if (isDocumentPrompt(prompt)) {
+  const attachments = prompt.attachments ?? []
+  if (attachments.some((attachment) => attachment.kind === 'document')) {
     void fetchImpl
     throw createUnsupportedFunctionalityError(
       'streaming document attachments is not supported yet; disable streaming.'
     )
   }
-  const context = promptToContext({ system, prompt })
+  const context = promptToContext(prompt)
 
   const controller = new AbortController()
   let timeoutId: ReturnType<typeof setTimeout> | null = null

@@ -16,7 +16,7 @@ import type { LlmCall, RunMetricsReport } from '../../../costs.js'
 import type { OutputLanguage } from '../../../language.js'
 import { formatOutputLanguageForJson } from '../../../language.js'
 import { parseGatewayStyleModelId } from '../../../llm/model-id.js'
-import { buildPromptPayload } from '../../../llm/prompt.js'
+import type { Prompt } from '../../../llm/prompt.js'
 import type { ExecFileFn } from '../../../markitdown.js'
 import { buildAutoModelAttempts } from '../../../model-auto.js'
 import type { FixedModelSpec, RequestedModel } from '../../../model-spec.js'
@@ -140,14 +140,17 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
     },
     attachment: args.attachment,
   })
-  const promptPayload = buildPromptPayload({ text: promptText, attachments })
+  const prompt: Prompt = {
+    userText: promptText,
+    ...(attachments.length > 0 ? { attachments } : {}),
+  }
 
   const summaryLengthTarget =
     ctx.lengthArg.kind === 'preset'
       ? ctx.lengthArg.preset
       : { maxCharacters: ctx.lengthArg.maxCharacters }
 
-  const promptTokensForAuto = attachments.length === 0 ? countTokens(promptText) : null
+  const promptTokensForAuto = attachments.length === 0 ? countTokens(prompt.userText) : null
   const lowerMediaType = args.attachment.mediaType.toLowerCase()
   const kind = lowerMediaType.startsWith('video/')
     ? ('video' as const)
@@ -354,7 +357,7 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
       runAttempt: (attempt) =>
         ctx.summaryEngine.runSummaryAttempt({
           attempt,
-          prompt: promptPayload,
+          prompt,
           allowStreaming: ctx.streamingEnabled,
           onModelChosen: args.onModelChosen ?? null,
           cli: cliContext,

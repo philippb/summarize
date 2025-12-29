@@ -1,6 +1,6 @@
 import type { Context } from '@mariozechner/pi-ai'
 import { completeSimple } from '@mariozechner/pi-ai'
-import type { DocumentPrompt } from '../prompt.js'
+import type { Attachment } from '../attachments.js'
 import type { LlmTokenUsage } from '../types.js'
 import { normalizeTokenUsage } from '../usage.js'
 import { createUnsupportedFunctionalityError } from '../errors.js'
@@ -155,7 +155,8 @@ export async function completeOpenAiText({
 export async function completeOpenAiDocument({
   modelId,
   openaiConfig,
-  prompt,
+  promptText,
+  document,
   maxOutputTokens,
   temperature,
   timeoutMs,
@@ -163,12 +164,16 @@ export async function completeOpenAiDocument({
 }: {
   modelId: string
   openaiConfig: OpenAiClientConfig
-  prompt: DocumentPrompt
+  promptText: string
+  document: Attachment
   maxOutputTokens?: number
   temperature?: number
   timeoutMs: number
   fetchImpl: typeof fetch
 }): Promise<{ text: string; usage: LlmTokenUsage | null }> {
+  if (document.kind !== 'document') {
+    throw new Error('Internal error: expected a document attachment for OpenAI.')
+  }
   if (openaiConfig.isOpenRouter) {
     throw createUnsupportedFunctionalityError(
       'OpenRouter does not support PDF attachments for openai/... models'
@@ -183,7 +188,7 @@ export async function completeOpenAiDocument({
   const url = resolveOpenAiResponsesUrl(baseUrl)
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
-  const filename = prompt.document.filename?.trim() || 'document.pdf'
+  const filename = document.filename?.trim() || 'document.pdf'
   const payload = {
     model: modelId,
     input: [
@@ -193,9 +198,9 @@ export async function completeOpenAiDocument({
           {
             type: 'input_file',
             filename,
-            file_data: bytesToBase64(prompt.document.bytes),
+            file_data: bytesToBase64(document.bytes),
           },
-          { type: 'input_text', text: prompt.text },
+          { type: 'input_text', text: promptText },
         ],
       },
     ],

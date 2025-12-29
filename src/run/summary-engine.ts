@@ -4,7 +4,7 @@ import type { CliProvider } from '../config.js'
 import { isCliDisabled, runCliModel } from '../llm/cli.js'
 import { streamTextWithModelId } from '../llm/generate-text.js'
 import { parseGatewayStyleModelId } from '../llm/model-id.js'
-import { isDocumentPrompt, type PromptPayload } from '../llm/prompt.js'
+import type { Prompt } from '../llm/prompt.js'
 import { formatCompactCount } from '../tty/format.js'
 import { createRetryLogger, writeVerbose } from './logging.js'
 import { prepareMarkdownForTerminalStreaming } from './markdown.js'
@@ -129,7 +129,7 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
     cli,
   }: {
     attempt: ModelAttempt
-    prompt: PromptPayload
+    prompt: Prompt
     allowStreaming: boolean
     onModelChosen?: ((modelId: string) => void) | null
     cli?: {
@@ -147,7 +147,8 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
     onModelChosen?.(attempt.userModelId)
 
     if (attempt.transport === 'cli') {
-      const cliPrompt = typeof prompt === 'string' ? prompt : (cli?.promptOverride ?? null)
+      const hasAttachments = (prompt.attachments?.length ?? 0) > 0
+      const cliPrompt = hasAttachments ? (cli?.promptOverride ?? null) : prompt.userText
       if (!cliPrompt) {
         throw new Error('CLI models require a text prompt (no binary attachments).')
       }
@@ -212,11 +213,14 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
       writeVerbose(deps.stderr, deps.verbose, modelResolution.note, deps.verboseColor)
     }
     const parsedModelEffective = parseGatewayStyleModelId(modelResolution.modelId)
+    const hasDocumentAttachment = (prompt.attachments ?? []).some(
+      (attachment) => attachment.kind === 'document'
+    )
     const streamingEnabledForCall =
       allowStreaming &&
       deps.streamingEnabled &&
       !modelResolution.forceStreamOff &&
-      !isDocumentPrompt(prompt)
+      !hasDocumentAttachment
     const forceChatCompletions =
       Boolean(attempt.forceChatCompletions) ||
       (deps.openaiUseChatCompletions && parsedModelEffective.provider === 'openai')
@@ -231,9 +235,9 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
       typeof maxInputTokensForCall === 'number' &&
       Number.isFinite(maxInputTokensForCall) &&
       maxInputTokensForCall > 0 &&
-      typeof prompt === 'string'
+      (prompt.attachments?.length ?? 0) === 0
     ) {
-      const tokenCount = countTokens(prompt)
+      const tokenCount = countTokens(prompt.userText)
       if (tokenCount > maxInputTokensForCall) {
         throw new Error(
           `Input token count (${formatCompactCount(tokenCount)}) exceeds model input limit (${formatCompactCount(maxInputTokensForCall)}). Tokenized with GPT tokenizer; prompt included.`

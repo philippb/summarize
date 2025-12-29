@@ -1,6 +1,6 @@
 import type { Context } from '@mariozechner/pi-ai'
 import { completeSimple } from '@mariozechner/pi-ai'
-import type { DocumentPrompt } from '../prompt.js'
+import type { Attachment } from '../attachments.js'
 import type { LlmTokenUsage } from '../types.js'
 import { normalizeTokenUsage } from '../usage.js'
 import { resolveGoogleModel } from './models.js'
@@ -68,7 +68,8 @@ export async function completeGoogleText({
 export async function completeGoogleDocument({
   modelId,
   apiKey,
-  prompt,
+  promptText,
+  document,
   maxOutputTokens,
   temperature,
   timeoutMs,
@@ -77,13 +78,17 @@ export async function completeGoogleDocument({
 }: {
   modelId: string
   apiKey: string
-  prompt: DocumentPrompt
+  promptText: string
+  document: Attachment
   maxOutputTokens?: number
   temperature?: number
   timeoutMs: number
   fetchImpl: typeof fetch
   googleBaseUrlOverride?: string | null
 }): Promise<{ text: string; usage: LlmTokenUsage | null }> {
+  if (document.kind !== 'document') {
+    throw new Error('Internal error: expected a document attachment for Google.')
+  }
   const baseUrl =
     resolveBaseUrlOverride(googleBaseUrlOverride) ??
     'https://generativelanguage.googleapis.com/v1beta'
@@ -98,11 +103,11 @@ export async function completeGoogleDocument({
         parts: [
           {
             inline_data: {
-              mime_type: prompt.document.mediaType,
-              data: bytesToBase64(prompt.document.bytes),
+              mime_type: document.mediaType,
+              data: bytesToBase64(document.bytes),
             },
           },
-          { text: prompt.text },
+          { text: promptText },
         ],
       },
     ],

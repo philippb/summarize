@@ -39,16 +39,15 @@ describe('Transcript→Markdown converter', async () => {
     expect(result).toBe('# Formatted Transcript\n\nThis is a well-structured transcript.')
     expect(generateTextWithModelIdMock).toHaveBeenCalledTimes(1)
     const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as {
-      system?: string
-      prompt: string
+      prompt: { system?: string; userText: string }
       modelId: string
     }
     expect(args.modelId).toBe('openai/gpt-5.2')
-    expect(args.system).toContain('You convert raw transcripts')
-    expect(args.system).toContain('filler words')
-    expect(args.prompt).toContain('Title: How to Speak')
-    expect(args.prompt).toContain('Source: YouTube')
-    expect(args.prompt).toContain('Hello everyone')
+    expect(args.prompt.system).toContain('You convert raw transcripts')
+    expect(args.prompt.system).toContain('filler words')
+    expect(args.prompt.userText).toContain('Title: How to Speak')
+    expect(args.prompt.userText).toContain('Source: YouTube')
+    expect(args.prompt.userText).toContain('Hello everyone')
   })
 
   it('handles null title and source gracefully', async () => {
@@ -71,9 +70,11 @@ describe('Transcript→Markdown converter', async () => {
       timeoutMs: 2000,
     })
 
-    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as { prompt: string }
-    expect(args.prompt).toContain('Title: unknown')
-    expect(args.prompt).toContain('Source: unknown')
+    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as {
+      prompt: { userText: string }
+    }
+    expect(args.prompt.userText).toContain('Title: unknown')
+    expect(args.prompt.userText).toContain('Source: unknown')
   })
 
   it('truncates very large transcript inputs', async () => {
@@ -97,8 +98,10 @@ describe('Transcript→Markdown converter', async () => {
       timeoutMs: 2000,
     })
 
-    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as { prompt: string }
-    expect(args.prompt).not.toContain('MARKER')
+    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as {
+      prompt: { userText: string }
+    }
+    expect(args.prompt.userText).not.toContain('MARKER')
   })
 
   it('calls onUsage callback with model info', async () => {

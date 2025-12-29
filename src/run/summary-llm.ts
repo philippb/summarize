@@ -1,7 +1,7 @@
 import { generateTextWithModelId } from '../llm/generate-text.js'
 import { resolveGoogleModelForUsage } from '../llm/google-models.js'
 import type { parseGatewayStyleModelId } from '../llm/model-id.js'
-import type { PromptPayload } from '../llm/prompt.js'
+import type { Prompt } from '../llm/prompt.js'
 
 export async function resolveModelIdForLlmCall({
   parsedModel,
@@ -56,7 +56,7 @@ export async function summarizeWithModelId({
   onRetry,
 }: {
   modelId: string
-  prompt: PromptPayload
+  prompt: Prompt
   maxOutputTokens?: number
   timeoutMs: number
   fetchImpl: typeof fetch

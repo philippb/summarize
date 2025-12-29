@@ -499,7 +499,7 @@ export async function refreshFree({
           await generateTextWithModelId({
             modelId: `openai/${openrouterModelId}`,
             apiKeys,
-            prompt: 'Reply with a single word: OK',
+            prompt: { userText: 'Reply with a single word: OK' },
             temperature: 0,
             maxOutputTokens: 16,
             timeoutMs: TIMEOUT_MS,
@@ -543,7 +543,7 @@ export async function refreshFree({
               await generateTextWithModelId({
                 modelId: `openai/${openrouterModelId}`,
                 apiKeys,
-                prompt: 'Reply with a single word: OK',
+                prompt: { userText: 'Reply with a single word: OK' },
                 temperature: 0,
                 maxOutputTokens: 16,
                 timeoutMs: TIMEOUT_MS,
@@ -683,7 +683,7 @@ export async function refreshFree({
           await generateTextWithModelId({
             modelId: `openai/${openrouterModelId}`,
             apiKeys,
-            prompt: 'Reply with a single word: OK',
+            prompt: { userText: 'Reply with a single word: OK' },
             temperature: 0,
             maxOutputTokens: 16,
             timeoutMs: TIMEOUT_MS,

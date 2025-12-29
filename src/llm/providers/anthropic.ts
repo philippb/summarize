@@ -1,6 +1,6 @@
 import type { Context } from '@mariozechner/pi-ai'
 import { completeSimple } from '@mariozechner/pi-ai'
-import type { DocumentPrompt } from '../prompt.js'
+import type { Attachment } from '../attachments.js'
 import type { LlmTokenUsage } from '../types.js'
 import { normalizeTokenUsage } from '../usage.js'
 import { resolveAnthropicModel } from './models.js'
@@ -106,7 +106,8 @@ export async function completeAnthropicText({
 export async function completeAnthropicDocument({
   modelId,
   apiKey,
-  prompt,
+  promptText,
+  document,
   system,
   maxOutputTokens,
   timeoutMs,
@@ -115,13 +116,17 @@ export async function completeAnthropicDocument({
 }: {
   modelId: string
   apiKey: string
-  prompt: DocumentPrompt
+  promptText: string
+  document: Attachment
   system?: string
   maxOutputTokens?: number
   timeoutMs: number
   fetchImpl: typeof fetch
   anthropicBaseUrlOverride?: string | null
 }): Promise<{ text: string; usage: LlmTokenUsage | null }> {
+  if (document.kind !== 'document') {
+    throw new Error('Internal error: expected a document attachment for Anthropic.')
+  }
   const baseUrl = resolveBaseUrlOverride(anthropicBaseUrlOverride) ?? 'https://api.anthropic.com'
   const url = new URL('/v1/messages', baseUrl)
   const controller = new AbortController()
@@ -138,11 +143,11 @@ export async function completeAnthropicDocument({
             type: 'document',
             source: {
               type: 'base64',
-              media_type: prompt.document.mediaType,
-              data: bytesToBase64(prompt.document.bytes),
+              media_type: document.mediaType,
+              data: bytesToBase64(document.bytes),
             },
           },
-          { type: 'text', text: prompt.text },
+          { type: 'text', text: promptText },
         ],
       },
     ],

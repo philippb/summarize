@@ -11,6 +11,7 @@ import {
 import type { ExtractedLinkContent } from '../../../content/index.js'
 import { formatOutputLanguageForJson } from '../../../language.js'
 import { parseGatewayStyleModelId } from '../../../llm/model-id.js'
+import type { Prompt } from '../../../llm/prompt.js'
 import { buildAutoModelAttempts } from '../../../model-auto.js'
 import { buildLinkSummaryPrompt } from '../../../prompts/index.js'
 import { parseCliUserModelId } from '../../env.js'
@@ -256,7 +257,8 @@ export async function summarizeExtractedUrl({
 }) {
   const { io, flags, model, cache: cacheState, hooks } = ctx
 
-  const promptTokens = countTokens(prompt)
+  const promptPayload: Prompt = { userText: prompt }
+  const promptTokens = countTokens(promptPayload.userText)
   const kindForAuto = extracted.siteName === 'YouTube' ? ('youtube' as const) : ('website' as const)
 
   const attempts: ModelAttempt[] = await (async () => {
@@ -406,7 +408,7 @@ export async function summarizeExtractedUrl({
       runAttempt: (attempt) =>
         model.summaryEngine.runSummaryAttempt({
           attempt,
-          prompt,
+          prompt: promptPayload,
           allowStreaming: flags.streamingEnabled,
           onModelChosen: onModelChosen ?? null,
         }),

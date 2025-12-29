@@ -61,7 +61,7 @@ function shouldSoftSkipLiveError(message: string): boolean {
             anthropicApiKey: null,
             openrouterApiKey: OPENROUTER_API_KEY,
           },
-          prompt: 'Say exactly: ok',
+          prompt: { userText: 'Say exactly: ok' },
           maxOutputTokens: 32,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),

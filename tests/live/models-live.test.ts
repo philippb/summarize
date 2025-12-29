@@ -35,7 +35,7 @@ function shouldSoftSkipLiveError(message: string): boolean {
         const result = await generateTextWithModelId({
           modelId: 'openai/gpt-5.2',
           apiKeys,
-          prompt: 'Say exactly: ok',
+          prompt: { userText: 'Say exactly: ok' },
           maxOutputTokens: 32,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),
@@ -61,7 +61,7 @@ function shouldSoftSkipLiveError(message: string): boolean {
         const result = await generateTextWithModelId({
           modelId: 'anthropic/claude-opus-4-1',
           apiKeys,
-          prompt: 'Say exactly: ok',
+          prompt: { userText: 'Say exactly: ok' },
           maxOutputTokens: 32,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),
@@ -87,7 +87,7 @@ function shouldSoftSkipLiveError(message: string): boolean {
         const result = await generateTextWithModelId({
           modelId: 'xai/grok-4-1-fast',
           apiKeys,
-          prompt: 'Say exactly: ok',
+          prompt: { userText: 'Say exactly: ok' },
           maxOutputTokens: 32,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),
@@ -113,7 +113,7 @@ function shouldSoftSkipLiveError(message: string): boolean {
         const result = await generateTextWithModelId({
           modelId: 'google/gemini-3-flash-preview',
           apiKeys,
-          prompt: 'Say exactly: ok',
+          prompt: { userText: 'Say exactly: ok' },
           maxOutputTokens: 32,
           timeoutMs,
           fetchImpl: globalThis.fetch.bind(globalThis),

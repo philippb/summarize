@@ -123,11 +123,10 @@ describe('cli --extract --format md --markdown-mode llm (transcript markdownify)
     const output = stdoutChunks.join('')
     expect(mocks.generateTextWithModelId).toHaveBeenCalledTimes(1)
     const generateArgs = (mocks.generateTextWithModelId.mock.calls[0]?.[0] ?? {}) as {
-      system?: string
-      prompt?: string
+      prompt?: { system?: string; userText?: string }
     }
-    expect(generateArgs.system).toContain('convert raw transcripts')
-    expect(generateArgs.prompt).toContain('SPEAKER: Hello everyone')
+    expect(generateArgs.prompt?.system).toContain('convert raw transcripts')
+    expect(generateArgs.prompt?.userText).toContain('SPEAKER: Hello everyone')
     // Should contain the LLM-formatted markdown, not raw transcript
     expect(output).toContain('# How to Speak')
     expect(output).toContain('Hello everyone')

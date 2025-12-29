@@ -36,14 +36,13 @@ describe('HTML→Markdown converter', async () => {
     expect(result).toBe('# Hello')
     expect(generateTextWithModelIdMock).toHaveBeenCalledTimes(1)
     const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as {
-      system?: string
-      prompt: string
+      prompt: { system?: string; userText: string }
       modelId: string
     }
     expect(args.modelId).toBe('openai/gpt-5.2')
-    expect(args.system).toContain('You convert HTML')
-    expect(args.prompt).toContain('URL: https://example.com')
-    expect(args.prompt).toContain('<h1>Hello</h1>')
+    expect(args.prompt.system).toContain('You convert HTML')
+    expect(args.prompt.userText).toContain('URL: https://example.com')
+    expect(args.prompt.userText).toContain('<h1>Hello</h1>')
   })
 
   it('truncates very large HTML inputs', async () => {
@@ -67,8 +66,10 @@ describe('HTML→Markdown converter', async () => {
       timeoutMs: 2000,
     })
 
-    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as { prompt: string }
-    expect(args.prompt).not.toContain('MARKER')
+    const args = generateTextWithModelIdMock.mock.calls[0]?.[0] as {
+      prompt: { userText: string }
+    }
+    expect(args.prompt.userText).not.toContain('MARKER')
   })
 
   it('does not forward OpenRouter provider options to generateTextWithModelId', async () => {
