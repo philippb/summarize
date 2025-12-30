@@ -506,8 +506,12 @@ function SummarizeControl(props: SummarizeControlProps) {
     }
     triggerProps.onKeyDown?.(event)
   }
-  const { onClick: _onClick, onPointerDown: _onPointerDown, onKeyDown: _onKeyDown, ...rest } =
-    triggerProps
+  const {
+    onClick: _onClick,
+    onPointerDown: _onPointerDown,
+    onKeyDown: _onKeyDown,
+    ...rest
+  } = triggerProps
 
   return (
     <div className="picker summarizePicker" {...api.getRootProps()}>
