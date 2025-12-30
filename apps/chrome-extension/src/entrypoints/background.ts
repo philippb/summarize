@@ -581,7 +581,7 @@ export default defineBackground(() => {
       diagnostics: null,
     })
 
-    sendStatus('Requesting daemon…')
+    sendStatus('Connecting…')
     inflightUrl = resolvedPayload.url
     let id: string
     try {
