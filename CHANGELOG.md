@@ -38,6 +38,7 @@
 - Chrome Side Panel chat: when a video page was previously summarized from page text, chat now re-extracts via the daemon so duration + transcription metadata are included.
 - Chrome Side Panel: align summarize dropdown caret with label.
 - Install: use npm releases for osc-progress/tokentally instead of git deps.
+- Chrome Side Panel: auto-summarize now kicks when opening the side panel.
 - YouTube transcripts: propagate duration into transcript metadata so chat can answer “how long is this video?” reliably.
 - Chrome Side Panel chat: tighten bottom padding so the input dock doesn't leave excess gap.
 - YouTube transcripts: fall back to the YouTube player API for duration when the watch HTML omits it.

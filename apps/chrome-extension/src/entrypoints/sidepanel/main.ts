@@ -108,6 +108,7 @@ const panelState: PanelState = {
 let drawerAnimation: Animation | null = null
 let autoValue = false
 let chatEnabledValue = defaultSettings.chatEnabled
+let autoKickTimer = 0
 
 const MAX_CHAT_MESSAGES = 1000
 const MAX_CHAT_CHARACTERS = 160_000
@@ -1477,6 +1478,7 @@ function handleBgMessage(msg: BgToPanel) {
       return
     case 'run:start':
       lastAction = 'summarize'
+      window.clearTimeout(autoKickTimer)
       if (panelState.chatStreaming) {
         chatStreamController.abort()
       }
@@ -1498,6 +1500,17 @@ function handleBgMessage(msg: BgToPanel) {
       })
       return
   }
+}
+
+function scheduleAutoKick() {
+  if (!autoValue) return
+  window.clearTimeout(autoKickTimer)
+  autoKickTimer = window.setTimeout(() => {
+    if (!autoValue) return
+    if (panelState.phase !== 'idle') return
+    if (panelState.summaryMarkdown) return
+    sendSummarize()
+  }, 350)
 }
 
 function send(message: PanelToBg) {
@@ -1824,6 +1837,7 @@ void (async () => {
     handleBgMessage(msg)
   })
   send({ type: 'panel:ready' })
+  scheduleAutoKick()
 })()
 
 setInterval(() => {
@@ -1837,12 +1851,14 @@ function markPanelOpen() {
   if (panelMarkedOpen) return
   panelMarkedOpen = true
   send({ type: 'panel:ready' })
+  scheduleAutoKick()
   void syncWithActiveTab()
 }
 
 function markPanelClosed() {
   if (!panelMarkedOpen) return
   panelMarkedOpen = false
+  window.clearTimeout(autoKickTimer)
   send({ type: 'panel:closed' })
 }
 
