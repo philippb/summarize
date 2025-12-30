@@ -657,10 +657,12 @@ test('sidepanel video selection forces transcript mode', async () => {
       stats: { pageWords: 120, videoDurationSeconds: 90 },
       status: '',
     })
-    await expect.poll(async () => {
-      await sendBgMessage(harness, { type: 'ui:state', state: mediaState })
-      return await page.locator('.summarizeButton.isDropdown').count()
-    }).toBe(1)
+    await expect
+      .poll(async () => {
+        await sendBgMessage(harness, { type: 'ui:state', state: mediaState })
+        return await page.locator('.summarizeButton.isDropdown').count()
+      })
+      .toBe(1)
 
     const sseBody = [
       'event: chunk',
