@@ -400,7 +400,7 @@ test('sidepanel refresh free shows error on failure', async () => {
 
     await harness.context.route('http://127.0.0.1:8787/v1/refresh-free', async (route) => {
       await route.fulfill({
-        status: 500,
+        status: 200,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ok: false, error: 'nope' }),
       })
@@ -705,6 +705,7 @@ test('sidepanel chat queue sends next message after stream completes', async () 
     await activateTabByUrl(harness, 'https://example.com')
     await waitForActiveTabUrl(harness, 'https://example.com')
     await sendChat('First question')
+    await expect.poll(() => chatRequestCount).toBe(1)
     await sendChat('Second question')
 
     const queueItems = page.locator('#chatQueue .chatQueueItem')
@@ -1134,6 +1135,7 @@ test('options keeps custom model selected while presets refresh', async () => {
 
     const page = await openExtensionPage(harness, 'options.html', '#pickersRoot')
     await expect.poll(() => modelCalls).toBeGreaterThanOrEqual(1)
+    await expect(page.locator('#modelPreset')).toHaveValue('auto')
 
     await page.click('#modelPreset')
     await expect.poll(() => modelCalls).toBe(2)
