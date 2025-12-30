@@ -67,7 +67,14 @@ type UiState = {
 
 type ExtractRequest = { type: 'extract'; maxChars: number }
 type ExtractResponse =
-  | { ok: true; url: string; title: string | null; text: string; truncated: boolean }
+  | {
+      ok: true
+      url: string
+      title: string | null
+      text: string
+      truncated: boolean
+      mediaDurationSeconds?: number | null
+    }
   | { ok: false; error: string }
 
 const optionsWindowSize = { width: 940, height: 680 }
@@ -309,7 +316,7 @@ export default defineBackground(() => {
             transcriptCharacters: null,
             transcriptWordCount: null,
             transcriptLines: null,
-            mediaDurationSeconds: null,
+            mediaDurationSeconds: extracted.mediaDurationSeconds ?? null,
             diagnostics: null,
           }
           cachedExtracts.set(tab.id, next)
@@ -384,6 +391,15 @@ export default defineBackground(() => {
       transcriptLines: json.extracted.transcriptLines ?? null,
       mediaDurationSeconds: json.extracted.mediaDurationSeconds ?? null,
       diagnostics: json.extracted.diagnostics ?? null,
+    }
+    if (!next.mediaDurationSeconds) {
+      const fallback = await extractFromTab(tab.id, CHAT_FULL_TRANSCRIPT_MAX_CHARS)
+      if (fallback.ok) {
+        const duration = fallback.data.mediaDurationSeconds
+        if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) {
+          next.mediaDurationSeconds = duration
+        }
+      }
     }
     cachedExtracts.set(tab.id, next)
     return next
@@ -492,7 +508,7 @@ export default defineBackground(() => {
       transcriptCharacters: null,
       transcriptWordCount: null,
       transcriptLines: null,
-      mediaDurationSeconds: null,
+      mediaDurationSeconds: extracted.mediaDurationSeconds ?? null,
       diagnostics: null,
     })
 

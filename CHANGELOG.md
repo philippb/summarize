@@ -33,6 +33,7 @@
 - Chrome Side Panel chat: tighten bottom padding so the input dock doesn't leave excess gap.
 - YouTube transcripts: fall back to the YouTube player API for duration when the watch HTML omits it.
 - YouTube transcripts: fall back to yt-dlp metadata for duration when API and HTML data are missing.
+- Chrome Side Panel chat: fall back to content-script video duration when URL extraction has no duration metadata.
 - Hover summaries: hide tooltips on error pages, show only after the first streamed chunk, avoid recycled-anchor mismatches, add hover debug logging when extended logging is enabled, and suppress native title tooltips while hover summaries are visible.
 - Chrome extension: avoid Chrome “Local network access” prompts for hover summaries by proxying localhost daemon calls through the background service worker.
 - URL extraction: preserve final redirected URL so shorteners (t.co) summarize the real destination.
