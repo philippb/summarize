@@ -184,6 +184,7 @@ export async function runUrlFlow({
                 firecrawl: options.firecrawl,
                 format: options.format,
                 markdownMode: options.markdownMode ?? null,
+                transcriptTimestamps: options.transcriptTimestamps ?? false,
                 ...(typeof options.maxCharacters === 'number'
                   ? { maxCharacters: options.maxCharacters }
                   : {}),

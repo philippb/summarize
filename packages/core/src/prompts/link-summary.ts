@@ -107,6 +107,9 @@ export function buildLinkSummaryPrompt({
       ? effectiveSummaryLength
       : pickSummaryLengthForCharacters(effectiveSummaryLength.maxCharacters)
   const directive = resolveSummaryLengthSpec(preset)
+  const formattingLine = hasTranscriptTimestamps
+    ? 'Use a bullet list of key points. Start each bullet with a [mm:ss] (or [hh:mm:ss]) timestamp from the transcript.'
+    : directive.formatting
   const presetLengthLine =
     typeof effectiveSummaryLength === 'string' ? formatPresetLengthGuidance(preset) : ''
   const needsHeadings =
@@ -150,12 +153,16 @@ export function buildLinkSummaryPrompt({
 
   const shareBlock = shares.length > 0 ? `Tweets from sharers:\n${shareLines.join('\n')}` : ''
   const timestampInstruction = hasTranscriptTimestamps
-    ? 'When referencing specific moments, include the exact [mm:ss] (or [hh:mm:ss]) timestamp from the transcript inline. Do not invent timestamps or use ranges.'
+    ? 'If you mention a specific moment, the timestamp must appear in the same sentence. Do not invent timestamps or use ranges.'
     : ''
+  const listGuidanceLine = hasTranscriptTimestamps
+    ? 'Use the bullet list format above and keep each bullet concise.'
+    : 'Use short paragraphs; use bullet lists only when they improve scanability; avoid rigid templates.'
+
   const baseInstructions = [
     audienceLine,
     directive.guidance,
-    directive.formatting,
+    formattingLine,
     headingInstruction,
     presetLengthLine,
     maxCharactersLine,
@@ -165,7 +172,7 @@ export function buildLinkSummaryPrompt({
     'Do not use emojis, disclaimers, or speculation.',
     'Write in direct, factual language.',
     'Format the answer in Markdown and obey the length-specific formatting above.',
-    'Use short paragraphs; use bullet lists only when they improve scanability; avoid rigid templates.',
+    listGuidanceLine,
     'Base everything strictly on the provided content and never invent details.',
     timestampInstruction,
     shareGuidance,

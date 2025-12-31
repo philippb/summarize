@@ -134,6 +134,7 @@ describe('buildLinkSummaryPrompt', () => {
       shares: [],
     })
 
-    expect(prompt).toContain('include the exact [mm:ss]')
+    expect(prompt).toContain('Use a bullet list of key points')
+    expect(prompt).toContain('Start each bullet with a [mm:ss]')
   })
 })

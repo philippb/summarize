@@ -101,6 +101,14 @@ describe('link-preview content utils', () => {
     expect(selectBaseContent('SOURCE', '  hello \n world ')).toContain('Transcript:\n')
   })
 
+  it('prefers timed transcript content when segments are available', () => {
+    const content = selectBaseContent('SOURCE', 'plain transcript', [
+      { startMs: 1000, endMs: 2000, text: 'Hello' },
+    ])
+    expect(content).toContain('Transcript:\n')
+    expect(content).toContain('[0:01] Hello')
+  })
+
   it('summarizes transcript basics', () => {
     expect(summarizeTranscript(null)).toEqual({
       transcriptCharacters: null,

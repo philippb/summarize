@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildSummaryCacheKey, extractTaggedBlock } from '../src/cache.js'
+import { buildExtractCacheKey, buildSummaryCacheKey, extractTaggedBlock } from '../src/cache.js'
 
 describe('cache keys and tags', () => {
   it('extracts tagged blocks', () => {
@@ -51,5 +51,18 @@ describe('cache keys and tags', () => {
     expect(diffModel).not.toBe(base)
     expect(diffLength).not.toBe(base)
     expect(diffLang).not.toBe(base)
+  })
+
+  it('changes extract keys when transcript timestamp options change', () => {
+    const base = buildExtractCacheKey({
+      url: 'https://example.com/video',
+      options: { youtubeTranscript: 'auto', transcriptTimestamps: false },
+    })
+    const withTimestamps = buildExtractCacheKey({
+      url: 'https://example.com/video',
+      options: { youtubeTranscript: 'auto', transcriptTimestamps: true },
+    })
+
+    expect(withTimestamps).not.toBe(base)
   })
 })
