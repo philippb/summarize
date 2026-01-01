@@ -92,6 +92,21 @@ function buildAssistant(text: string) {
   }
 }
 
+function buildAgentStream(text: string) {
+  const assistant = buildAssistant(text)
+  return [
+    'event: chunk',
+    `data: ${JSON.stringify({ text })}`,
+    '',
+    'event: assistant',
+    `data: ${JSON.stringify(assistant)}`,
+    '',
+    'event: done',
+    'data: {}',
+    '',
+  ].join('\n')
+}
+
 function filterAllowed(errors: string[]) {
   return errors.filter((message) => !consoleErrorAllowlist.some((pattern) => pattern.test(message)))
 }
@@ -984,7 +999,9 @@ test('sidepanel shows daemon upgrade hint when /v1/agent is missing', async ({
 
     await expect.poll(() => agentCalls).toBe(1)
     await expect(page.locator('#error')).toBeVisible()
-    await expect(page.locator('#errorMessage')).toContainText('Daemon does not support /v1/agent')
+    await expect(page.locator('#errorMessage')).toContainText(
+      'Daemon does not support /v1/agent/stream'
+    )
     assertNoErrors(harness)
   } finally {
     await closeExtension(harness.context, harness.userDataDir)
@@ -1044,13 +1061,14 @@ test('sidepanel chat queue sends next message after stream completes', async ({
       releaseFirst = resolve
     })
 
-    await harness.context.route('http://127.0.0.1:8787/v1/agent', async (route) => {
+    await harness.context.route('http://127.0.0.1:8787/v1/agent/stream', async (route) => {
       agentRequestCount += 1
       if (agentRequestCount === 1) await firstGate
+      const body = buildAgentStream(`Reply ${agentRequestCount}`)
       await route.fulfill({
         status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ok: true, assistant: buildAssistant(`Reply ${agentRequestCount}`) }),
+        headers: { 'content-type': 'text/event-stream' },
+        body,
       })
     })
 
@@ -1109,13 +1127,14 @@ test('sidepanel chat queue drains messages after stream completes', async ({
       releaseFirst = resolve
     })
 
-    await harness.context.route('http://127.0.0.1:8787/v1/agent', async (route) => {
+    await harness.context.route('http://127.0.0.1:8787/v1/agent/stream', async (route) => {
       agentRequestCount += 1
       if (agentRequestCount === 1) await firstGate
+      const body = buildAgentStream(`Reply ${agentRequestCount}`)
       await route.fulfill({
         status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ok: true, assistant: buildAssistant(`Reply ${agentRequestCount}`) }),
+        headers: { 'content-type': 'text/event-stream' },
+        body,
       })
     })
 
@@ -1185,11 +1204,12 @@ test('sidepanel clears chat on user navigation', async ({
     await waitForActiveTabUrl(harness, 'https://example.com')
     await injectContentScript(harness, 'content-scripts/extract.js', 'https://example.com')
 
-    await harness.context.route('http://127.0.0.1:8787/v1/agent', async (route) => {
+    await harness.context.route('http://127.0.0.1:8787/v1/agent/stream', async (route) => {
+      const body = buildAgentStream('Ack')
       await route.fulfill({
         status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ok: true, assistant: buildAssistant('Ack') }),
+        headers: { 'content-type': 'text/event-stream' },
+        body,
       })
     })
 
