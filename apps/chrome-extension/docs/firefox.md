@@ -348,7 +348,7 @@ When ready for public distribution:
 2. **Sidebar width**: May need CSS adjustments for Firefox sidebar dimensions (requires manual testing)
 3. **Testing coverage**: Aiming for 100% feature parity where browser APIs allow
 4. **Distribution timeline**: When to submit to AMO?
-5. **Keyboard shortcut conflicts**: Does `Ctrl+Shift+S` conflict with common Firefox shortcuts?
+5. **Keyboard shortcut conflicts**: Does `Ctrl+Shift+U` conflict with common Firefox shortcuts?
 
 ---
 
@@ -368,8 +368,8 @@ Firefox **DOES support** programmatic sidebar control via the `sidebarAction` AP
 
 - **Keyboard Shortcut** (`wxt.config.ts:105-115`):
   - Added `_execute_sidebar_action` command to manifest
-  - Default: `Ctrl+Shift+S` (Windows/Linux)
-  - Mac: `Command+Shift+S`
+  - Default: `Ctrl+Shift+U` (Windows/Linux)
+  - Mac: `Command+Shift+U`
   - Users can customize this in Firefox settings: `about:addons` → Extensions → Manage Extension Shortcuts
 
 - **Manifest Changes** (`wxt.config.ts:61`):
@@ -378,5 +378,5 @@ Firefox **DOES support** programmatic sidebar control via the `sidebarAction` AP
 
 **User Experience**:
 1. **Click toolbar icon**: Toggles sidebar open/close
-2. **Keyboard shortcut**: `Ctrl+Shift+S` (or `Cmd+Shift+S` on Mac) toggles sidebar
+2. **Keyboard shortcut**: `Ctrl+Shift+U` (or `Cmd+Shift+U` on Mac) toggles sidebar
 3. **Customizable**: Users can change the shortcut in Firefox's extension settings

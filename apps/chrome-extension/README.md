@@ -3,8 +3,8 @@
 Browser extension for Chrome and Firefox that streams AI-powered summaries directly into your browser's sidebar/side panel.
 
 **Supported browsers**:
-- Chrome (Side Panel)
-- Firefox 131+ (Sidebar)
+- Chrome (Side Panel) - Auto-opens on toolbar icon click
+- Firefox 131+ (Sidebar) - Toggle with toolbar icon or `Ctrl+Shift+U`
 
 Docs + setup: `https://summarize.sh`
 
@@ -44,7 +44,14 @@ Step-by-step:
 3) Click **Load Temporary Add-on**
 4) Navigate to and select: `apps/chrome-extension/.output/firefox-mv3/manifest.json`
 5) You should now see "Summarize" in the extensions list
-6) Open the sidebar: View menu → Sidebar → Summarize (or Ctrl/Cmd+B)
+6) Open the sidebar using any of these methods:
+   - **Click the Summarize toolbar icon** (toggles sidebar open/close)
+   - **Keyboard shortcut**: `Ctrl+Shift+U` (Windows/Linux) or `Cmd+Shift+U` (Mac)
+   - **Menu**: View → Sidebar → Summarize
+
+**Customize keyboard shortcut** (optional):
+- Go to `about:addons` → Extensions → ⚙️ (gear icon) → Manage Extension Shortcuts
+- Find "Summarize" and click the current shortcut to change it
 
 **Note**: Temporary add-ons are removed when Firefox restarts. For permanent installation, the extension needs to be signed via AMO (Firefox Add-ons).
 
