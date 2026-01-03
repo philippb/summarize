@@ -21,6 +21,6 @@ export interface TranscriptCacheSetArgs {
 
 /** Public interface for pluggable transcript caches (CLI, daemon, apps). */
 export interface TranscriptCache {
-  get(args: { url: string }): Promise<TranscriptCacheGetResult | null>
+  get(args: { url: string; fileMtime?: number | null }): Promise<TranscriptCacheGetResult | null>
   set(args: TranscriptCacheSetArgs): Promise<void>
 }

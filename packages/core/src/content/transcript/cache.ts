@@ -19,6 +19,7 @@ export interface CacheReadArguments {
   cacheMode: CacheMode
   transcriptCache: TranscriptCache | null
   transcriptTimestamps?: boolean
+  fileMtime?: number | null
 }
 
 export interface TranscriptCacheLookup {
@@ -32,8 +33,11 @@ export const readTranscriptCache = async ({
   cacheMode,
   transcriptCache,
   transcriptTimestamps = false,
+  fileMtime,
 }: CacheReadArguments): Promise<TranscriptCacheLookup> => {
-  const cached = transcriptCache ? await transcriptCache.get({ url }) : null
+  const cached = transcriptCache
+    ? await transcriptCache.get({ url, fileMtime: fileMtime ?? null })
+    : null
   const diagnostics = buildBaseDiagnostics(cacheMode)
 
   if (!cached) {
