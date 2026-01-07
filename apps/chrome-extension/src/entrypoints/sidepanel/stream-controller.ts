@@ -1,4 +1,4 @@
-import { parseSseEvent, type SseMetaData } from '../../../../../src/shared/sse-events.js'
+import { parseSseEvent, type SseMetaData, type SseSlidesData } from '../../../../../src/shared/sse-events.js'
 import { mergeStreamingChunk } from '../../../../../src/shared/streaming-merge.js'
 import { parseSseStream, type SseMessage } from '../../lib/sse'
 import type { PanelPhase, RunStart } from './types'
@@ -14,6 +14,7 @@ export type StreamControllerOptions = {
   onStatus: (text: string) => void
   onPhaseChange: (phase: PanelPhase) => void
   onMeta: (meta: SseMetaData) => void
+  onSlides?: ((slides: SseSlidesData) => void) | null
   onError?: ((error: unknown) => string) | null
   fetchImpl?: typeof fetch
   idleTimeoutMs?: number
@@ -41,6 +42,7 @@ export function createStreamController(options: StreamControllerOptions): Stream
     onStatus,
     onPhaseChange,
     onMeta,
+    onSlides,
     onError,
     fetchImpl,
     onReset,
@@ -189,6 +191,8 @@ export function createStreamController(options: StreamControllerOptions): Stream
           if (typeof event.data.summaryFromCache === 'boolean') {
             onSummaryFromCache?.(event.data.summaryFromCache)
           }
+        } else if (event.event === 'slides') {
+          onSlides?.(event.data)
         } else if (event.event === 'status') {
           if (!streamedAnyNonWhitespace) onStatus(event.data.text)
         } else if (event.event === 'metrics') {

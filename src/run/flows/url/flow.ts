@@ -314,6 +314,9 @@ export async function runUrlFlow({
         ffmpegPath: null,
         tesseractPath: null,
       })
+      if (slidesResult) {
+        ctx.hooks.onSlidesExtracted?.(slidesResult)
+      }
       if (flags.progressEnabled) {
         updateSummaryProgress()
       }
@@ -432,6 +435,7 @@ export async function runUrlFlow({
       promptOverride: flags.promptOverride ?? null,
       lengthInstruction: flags.lengthInstruction ?? null,
       languageInstruction: flags.languageInstruction ?? null,
+      slides: slidesResult,
     })
 
     // Whisper transcription costs need to be folded into the finish line totals.

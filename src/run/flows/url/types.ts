@@ -6,7 +6,7 @@ import type { OutputLanguage } from '../../../language.js'
 import type { ExecFileFn } from '../../../markitdown.js'
 import type { FixedModelSpec, RequestedModel } from '../../../model-spec.js'
 import type { SummaryLength } from '../../../shared/contracts.js'
-import type { SlideSettings } from '../../../slides/index.js'
+import type { SlideExtractionResult, SlideSettings } from '../../../slides/index.js'
 import type { createSummaryEngine } from '../../summary-engine.js'
 import type { SummarizeAssetArgs } from '../asset/summary.js'
 
@@ -100,6 +100,7 @@ export type UrlFlowModel = {
 export type UrlFlowHooks = {
   onModelChosen?: ((modelId: string) => void) | null
   onExtracted?: ((extracted: ExtractedLinkContent) => void) | null
+  onSlidesExtracted?: ((slides: SlideExtractionResult) => void) | null
   onLinkPreviewProgress?: ((event: LinkPreviewProgressEvent) => void) | null
   onSummaryCached?: ((cached: boolean) => void) | null
   setTranscriptionCost: (costUsd: number | null, label: string | null) => void

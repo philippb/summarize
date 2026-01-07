@@ -106,6 +106,7 @@ type UiState = {
     hoverSummaries: boolean
     chatEnabled: boolean
     automationEnabled: boolean
+    slidesEnabled: boolean
     fontSize: number
     lineHeight: number
     model: string
@@ -130,6 +131,19 @@ type ExtractResponse =
   | { ok: false; error: string }
 type SeekResponse = { ok: true } | { ok: false; error: string }
 
+type SlidesPayload = {
+  sourceUrl: string
+  sourceId: string
+  sourceKind: string
+  ocrAvailable: boolean
+  slides: Array<{
+    index: number
+    timestamp: number
+    ocrText?: string | null
+    ocrConfidence?: number | null
+  }>
+}
+
 type PanelSession = {
   windowId: number
   port: chrome.runtime.Port
@@ -148,6 +162,37 @@ const optionsWindowMin = { width: 820, height: 560 }
 const optionsWindowMargin = 20
 const MIN_CHAT_CHARS = 100
 const CHAT_FULL_TRANSCRIPT_MAX_CHARS = Number.MAX_SAFE_INTEGER
+const MAX_SLIDE_OCR_CHARS = 8000
+
+const formatSlideTimestamp = (seconds: number): string => {
+  const safe = Math.max(0, Math.floor(seconds))
+  const h = Math.floor(safe / 3600)
+  const m = Math.floor((safe % 3600) / 60)
+  const s = safe % 60
+  const mm = m.toString().padStart(2, '0')
+  const ss = s.toString().padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`
+}
+
+const buildSlidesText = (slides: SlidesPayload | null): { count: number; text: string } | null => {
+  if (!slides || slides.slides.length === 0) return null
+  let remaining = MAX_SLIDE_OCR_CHARS
+  const lines: string[] = []
+  for (const slide of slides.slides) {
+    const text = slide.ocrText?.trim()
+    if (!text) continue
+    const timestamp = Number.isFinite(slide.timestamp)
+      ? formatSlideTimestamp(slide.timestamp)
+      : null
+    const label = timestamp ? `@ ${timestamp}` : ''
+    const entry = `Slide ${slide.index} ${label}:\n${text}`.trim()
+    if (entry.length > remaining && lines.length > 0) break
+    lines.push(entry)
+    remaining -= entry.length
+    if (remaining <= 0) break
+  }
+  return lines.length > 0 ? { count: slides.slides.length, text: lines.join('\n\n') } : null
+}
 
 function resolveOptionsUrl(): string {
   const page = chrome.runtime.getManifest().options_ui?.page ?? 'options.html'
@@ -512,6 +557,7 @@ export default defineBackground(() => {
     transcriptLines: number | null
     transcriptTimedText: string | null
     mediaDurationSeconds: number | null
+    slides: SlidesPayload | null
     diagnostics?: {
       strategy: string
       markdown?: { used?: boolean; provider?: string | null } | null
@@ -630,6 +676,7 @@ export default defineBackground(() => {
             transcriptLines: null,
             transcriptTimedText: null,
             mediaDurationSeconds: extracted.mediaDurationSeconds ?? null,
+            slides: null,
             diagnostics: null,
           }
           cachedExtracts.set(tab.id, next)
@@ -643,6 +690,7 @@ export default defineBackground(() => {
       }
     }
 
+    const wantsSlides = settings.slidesEnabled && shouldPreferUrlMode(tab.url)
     sendStatus(session, 'Extracting page content…')
     const res = await fetch('http://127.0.0.1:8787/v1/summarize', {
       method: 'POST',
@@ -655,6 +703,7 @@ export default defineBackground(() => {
         mode: 'url',
         extractOnly: true,
         timestamps: true,
+        ...(wantsSlides ? { slides: true, slidesOcr: true } : {}),
         maxCharacters: null,
       }),
     })
@@ -685,6 +734,7 @@ export default defineBackground(() => {
           } | null
         }
       }
+      slides?: SlidesPayload | null
       error?: string
     }
     if (!res.ok || !json.ok || !json.extracted) {
@@ -707,6 +757,7 @@ export default defineBackground(() => {
       transcriptLines: json.extracted.transcriptLines ?? null,
       transcriptTimedText: json.extracted.transcriptTimedText ?? null,
       mediaDurationSeconds: json.extracted.mediaDurationSeconds ?? null,
+      slides: json.slides ?? null,
       diagnostics: json.extracted.diagnostics ?? null,
     }
     if (!next.mediaDurationSeconds) {
@@ -783,6 +834,7 @@ export default defineBackground(() => {
         hoverSummaries: settings.hoverSummaries,
         chatEnabled: settings.chatEnabled,
         automationEnabled: settings.automationEnabled,
+        slidesEnabled: settings.slidesEnabled,
         fontSize: settings.fontSize,
         lineHeight: settings.lineHeight,
         model: settings.model,
@@ -855,6 +907,7 @@ export default defineBackground(() => {
       transcriptLines: null,
       transcriptTimedText: null,
       mediaDurationSeconds: extracted.mediaDurationSeconds ?? null,
+      slides: null,
       diagnostics: null,
     })
 
@@ -944,6 +997,11 @@ export default defineBackground(() => {
         resolvedPayload.media?.hasAudio === true ||
         resolvedPayload.media?.hasCaptions === true ||
         shouldPreferUrlMode(resolvedPayload.url))
+    const wantsSlides =
+      settings.slidesEnabled &&
+      (opts?.inputMode === 'video' ||
+        resolvedPayload.media?.hasVideo === true ||
+        shouldPreferUrlMode(resolvedPayload.url))
 
     cachedExtracts.set(tab.id, {
       url: resolvedPayload.url,
@@ -961,6 +1019,7 @@ export default defineBackground(() => {
       transcriptLines: null,
       transcriptTimedText: null,
       mediaDurationSeconds: resolvedPayload.mediaDurationSeconds ?? null,
+      slides: null,
       diagnostics: null,
     })
 
@@ -974,6 +1033,7 @@ export default defineBackground(() => {
         noCache: Boolean(opts?.refresh),
         inputMode: opts?.inputMode,
         timestamps: wantsSummaryTimestamps,
+        slidesEnabled: wantsSlides,
       })
       const res = await fetch('http://127.0.0.1:8787/v1/summarize', {
         method: 'POST',
@@ -1244,10 +1304,12 @@ export default defineBackground(() => {
           }
           const summaryText =
             typeof agentPayload.summary === 'string' ? agentPayload.summary.trim() : ''
+          const slidesContext = buildSlidesText(cachedExtract.slides)
           const pageContent = buildChatPageContent({
             transcript: cachedExtract.transcriptTimedText ?? cachedExtract.text,
             summary: summaryText,
             summaryCap: settings.maxChars,
+            slides: slidesContext,
             metadata: {
               url: cachedExtract.url,
               title: cachedExtract.title,

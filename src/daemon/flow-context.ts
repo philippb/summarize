@@ -53,6 +53,9 @@ export type DaemonUrlFlowContextArgs = {
   hooks?: {
     onModelChosen?: ((modelId: string) => void) | null
     onExtracted?: ((extracted: ExtractedLinkContent) => void) | null
+    onSlidesExtracted?: ((slides: Awaited<
+      ReturnType<typeof import('../slides/index.js').extractSlidesForSource>
+    >) => void) | null
     onLinkPreviewProgress?: ((event: LinkPreviewProgressEvent) => void) | null
     onSummaryCached?: ((cached: boolean) => void) | null
   } | null
@@ -371,6 +374,7 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     hooks: {
       onModelChosen: hooks?.onModelChosen ?? null,
       onExtracted: hooks?.onExtracted ?? null,
+      onSlidesExtracted: hooks?.onSlidesExtracted ?? null,
       onLinkPreviewProgress: hooks?.onLinkPreviewProgress ?? null,
       onSummaryCached: hooks?.onSummaryCached ?? null,
       setTranscriptionCost: metrics.setTranscriptionCost,

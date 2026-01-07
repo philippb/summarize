@@ -49,6 +49,7 @@ export function buildLinkSummaryPrompt({
   truncated,
   hasTranscript,
   hasTranscriptTimestamps = false,
+  slides,
   outputLanguage,
   summaryLength,
   shares,
@@ -64,6 +65,7 @@ export function buildLinkSummaryPrompt({
   truncated: boolean
   hasTranscript: boolean
   hasTranscriptTimestamps?: boolean
+  slides?: { count: number; text: string } | null
   summaryLength: SummaryLengthTarget
   outputLanguage?: OutputLanguage | null
   shares: ShareContextEntry[]
@@ -71,7 +73,10 @@ export function buildLinkSummaryPrompt({
   lengthInstruction?: string | null
   languageInstruction?: string | null
 }): string {
-  const contentCharacters = content.length
+  const slidesText = slides?.text?.trim() ?? ''
+  const contentWithSlides =
+    slidesText.length > 0 ? `${content}\n\nSlides (OCR):\n${slidesText}` : content
+  const contentCharacters = contentWithSlides.length
   const contextLines: string[] = [`Source URL: ${url}`]
 
   if (title) {
@@ -153,6 +158,10 @@ export function buildLinkSummaryPrompt({
   const timestampInstruction = hasTranscriptTimestamps
     ? 'Add a "Key moments" section with 3-6 bullets (2-4 if the summary is short). Start each bullet with a [mm:ss] (or [hh:mm:ss]) timestamp from the transcript. Keep the rest of the summary readable and follow the normal formatting guidance; do not prepend timestamps outside the Key moments section. Do not invent timestamps or use ranges.'
     : ''
+  const slideInstruction =
+    slides && slides.count > 0
+      ? 'If you use slide content, add a [slide:N] tag inline (N = slide index). Only tag slide-derived statements.'
+      : ''
   const listGuidanceLine =
     'Use short paragraphs; use bullet lists only when they improve scanability; avoid rigid templates.'
 
@@ -172,6 +181,7 @@ export function buildLinkSummaryPrompt({
     listGuidanceLine,
     'Base everything strictly on the provided content and never invent details.',
     timestampInstruction,
+    slideInstruction,
     shareGuidance,
   ]
     .filter((line) => typeof line === 'string' && line.trim().length > 0)
@@ -188,6 +198,6 @@ export function buildLinkSummaryPrompt({
   return buildTaggedPrompt({
     instructions,
     context,
-    content,
+    content: contentWithSlides,
   })
 }

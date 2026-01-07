@@ -1,32 +1,24 @@
 import { randomUUID } from 'node:crypto'
+import { createReadStream, promises as fs } from 'node:fs'
 import http from 'node:http'
 import { Writable } from 'node:stream'
-import type { AssistantMessage, Message } from '@mariozechner/pi-ai'
-import {
-  buildLanguageKey,
-  buildLengthKey,
-  buildSummaryCacheKey,
-  type CacheState,
-  hashString,
-  normalizeContentForHash,
-} from '../cache.js'
+import type { CacheState } from '../cache.js'
 import { loadSummarizeConfig } from '../config.js'
 import { createDaemonLogger } from '../logging/daemon.js'
 import { refreshFree } from '../refresh-free.js'
 import { createCacheStateFromConfig, refreshCacheStoreIfMissing } from '../run/cache-state.js'
 import { formatModelLabelForDisplay } from '../run/finish-line.js'
-import {
-  resolveOutputLanguageSetting,
-  resolveRunOverrides,
-  resolveSummaryLength,
-} from '../run/run-settings.js'
-import { encodeSseEvent, type SseEvent } from '../shared/sse-events.js'
+import { resolveExecutableInPath } from '../run/env.js'
+import { resolveRunOverrides } from '../run/run-settings.js'
+import { resolveSlideSettings } from '../slides/index.js'
+import { encodeSseEvent, type SseEvent, type SseSlidesData } from '../shared/sse-events.js'
 import { resolvePackageVersion } from '../version.js'
-import { buildAgentPromptHash, streamAgentResponse } from './agent.js'
+import { completeAgentResponse } from './agent.js'
 import { type DaemonRequestedMode, resolveAutoDaemonMode } from './auto-mode.js'
 import type { DaemonConfig } from './config.js'
 import { DAEMON_HOST, DAEMON_PORT_DEFAULT } from './constants.js'
 import { buildModelPickerOptions } from './models.js'
+import type { SlideExtractionResult, SlideSettings } from '../slides/index.js'
 import {
   extractContentForUrl,
   streamSummaryForUrl,
@@ -48,6 +40,7 @@ type Session = {
     inputSummary: string | null
     summaryFromCache: boolean | null
   }
+  slides: SlideExtractionResult | null
 }
 
 function json(
@@ -89,9 +82,6 @@ function resolveOriginHeader(req: http.IncomingMessage): string | null {
 
 function corsHeaders(origin: string | null): Record<string, string> {
   if (!origin) return {}
-  // Echo back any origin (chrome-extension://, moz-extension://, etc.)
-  // Security is enforced via Bearer token auth, not origin checking.
-  // This permissive CORS setup supports both Chrome and Firefox extensions.
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-credentials': 'true',
@@ -165,60 +155,12 @@ function createSession(): Session {
     done: false,
     clients: new Set(),
     lastMeta: { model: null, modelLabel: null, inputSummary: null, summaryFromCache: null },
+    slides: null,
   }
 }
 
 const MAX_SESSION_BUFFER_EVENTS = 2000
 const MAX_SESSION_BUFFER_BYTES = 512 * 1024
-
-type ChatCacheInput = {
-  cacheContent: string
-  model: string | null
-  length: unknown
-  language: unknown
-  automationEnabled: boolean
-}
-
-type ChatHistoryMessage = Extract<Message, { role: 'user' | 'assistant' }>
-
-function buildChatCacheKey({
-  cacheContent,
-  model,
-  length,
-  language,
-  automationEnabled,
-}: ChatCacheInput): string {
-  const contentHash = hashString(normalizeContentForHash(cacheContent))
-  const promptHash = buildAgentPromptHash(automationEnabled)
-  const { lengthArg } = resolveSummaryLength(length, 'xl')
-  const outputLanguage = resolveOutputLanguageSetting({ raw: language, fallback: { kind: 'auto' } })
-  const lengthKey = buildLengthKey(lengthArg)
-  const languageKey = buildLanguageKey(outputLanguage)
-  const modelKey = typeof model === 'string' && model.trim() ? model.trim() : 'auto'
-  return buildSummaryCacheKey({
-    contentHash,
-    promptHash,
-    model: modelKey,
-    lengthKey,
-    languageKey,
-  })
-}
-
-function filterChatHistoryMessages(raw: unknown): ChatHistoryMessage[] {
-  if (!Array.isArray(raw)) return []
-  const now = Date.now()
-  return raw
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => {
-      const msg = item as Message
-      if (msg.role !== 'user' && msg.role !== 'assistant') return null
-      if (typeof msg.timestamp !== 'number') {
-        ;(msg as ChatHistoryMessage).timestamp = now
-      }
-      return msg as ChatHistoryMessage
-    })
-    .filter((msg): msg is ChatHistoryMessage => Boolean(msg))
-}
 
 function pushToSession(
   session: Session,
@@ -267,6 +209,78 @@ function emitMeta(
   }
   session.lastMeta = next
   pushToSession(session, { event: 'meta', data: next }, onSessionEvent)
+}
+
+function emitSlides(
+  session: Session,
+  data: SseSlidesData,
+  onSessionEvent?: ((event: SessionEvent, sessionId: string) => void) | null
+) {
+  pushToSession(session, { event: 'slides', data }, onSessionEvent)
+}
+
+function resolveHomeDir(env: Record<string, string | undefined>): string {
+  const home = env.HOME?.trim() || env.USERPROFILE?.trim()
+  if (!home) return process.cwd()
+  return home
+}
+
+function resolveSlidesSettings({
+  env,
+  request,
+}: {
+  env: Record<string, string | undefined>
+  request: Record<string, unknown>
+}): SlideSettings | null {
+  const slidesValue = request.slides
+  const slidesOcrValue =
+    typeof request.slidesOcr === 'undefined' && slidesValue ? true : request.slidesOcr
+  return resolveSlideSettings({
+    slides: slidesValue,
+    slidesOcr: slidesOcrValue,
+    slidesDir: request.slidesDir ?? '.summarize/slides',
+    slidesSceneThreshold: request.slidesSceneThreshold,
+    slidesSceneThresholdExplicit: typeof request.slidesSceneThreshold !== 'undefined',
+    slidesMax: request.slidesMax,
+    slidesMinDuration: request.slidesMinDuration,
+    cwd: resolveHomeDir(env),
+  })
+}
+
+function buildSlidesPayload({
+  slides,
+  port,
+  sessionId,
+}: {
+  slides: SlideExtractionResult
+  port: number
+  sessionId: string
+}): SseSlidesData {
+  const baseUrl = `http://127.0.0.1:${port}/v1/summarize/${sessionId}/slides`
+  return {
+    sourceUrl: slides.sourceUrl,
+    sourceId: slides.sourceId,
+    sourceKind: slides.sourceKind,
+    ocrAvailable: slides.ocrAvailable,
+    slides: slides.slides.map((slide) => ({
+      index: slide.index,
+      timestamp: slide.timestamp,
+      imageUrl: `${baseUrl}/${slide.index}`,
+      ocrText: slide.ocrText ?? null,
+      ocrConfidence: slide.ocrConfidence ?? null,
+    })),
+  }
+}
+
+function resolveToolPath(
+  binary: string,
+  env: Record<string, string | undefined>,
+  explicitEnvKey?: string
+): string | null {
+  const explicit =
+    explicitEnvKey && typeof env[explicitEnvKey] === 'string' ? env[explicitEnvKey]?.trim() : ''
+  if (explicit) return resolveExecutableInPath(explicit, env)
+  return resolveExecutableInPath(binary, env)
 }
 
 function endSession(session: Session) {
@@ -349,6 +363,26 @@ export async function runDaemonServer({
           fetchImpl,
         })
         json(res, 200, result, cors)
+        return
+      }
+
+      if (req.method === 'GET' && pathname === '/v1/tools') {
+        const ytDlpPath = resolveToolPath('yt-dlp', env, 'YT_DLP_PATH')
+        const ffmpegPath = resolveToolPath('ffmpeg', env, 'FFMPEG_PATH')
+        const tesseractPath = resolveToolPath('tesseract', env, 'TESSERACT_PATH')
+        json(
+          res,
+          200,
+          {
+            ok: true,
+            tools: {
+              ytDlp: { available: Boolean(ytDlpPath), path: ytDlpPath },
+              ffmpeg: { available: Boolean(ffmpegPath), path: ffmpegPath },
+              tesseract: { available: Boolean(tesseractPath), path: tesseractPath },
+            },
+          },
+          cors
+        )
         return
       }
 
@@ -436,8 +470,8 @@ export async function runDaemonServer({
           timeout: obj.timeout,
           retries: obj.retries,
           maxOutputTokens: obj.maxOutputTokens,
-          transcriber: obj.transcriber,
         })
+        const slidesSettings = resolveSlidesSettings({ env, request: obj })
         const diagnostics = parseDiagnostics(obj.diagnostics)
         const includeContentLog = daemonLogger.enabled && diagnostics.includeContent
         const hasText = Boolean(textContent.trim())
@@ -454,14 +488,30 @@ export async function runDaemonServer({
             const requestCache: CacheState = noCache
               ? { ...cacheState, mode: 'bypass' as const, store: null }
               : cacheState
-            const extracted = await extractContentForUrl({
+            const { extracted, slides } = await extractContentForUrl({
               env,
               fetchImpl,
               input: { url: pageUrl, title, maxCharacters },
               cache: requestCache,
               overrides,
               format,
+              slides: slidesSettings,
             })
+            const slidesPayload =
+              slides && slides.slides.length > 0
+                ? {
+                    sourceUrl: slides.sourceUrl,
+                    sourceId: slides.sourceId,
+                    sourceKind: slides.sourceKind,
+                    ocrAvailable: slides.ocrAvailable,
+                    slides: slides.slides.map((slide) => ({
+                      index: slide.index,
+                      timestamp: slide.timestamp,
+                      ocrText: slide.ocrText ?? null,
+                      ocrConfidence: slide.ocrConfidence ?? null,
+                    })),
+                  }
+                : null
             json(
               res,
               200,
@@ -484,6 +534,7 @@ export async function runDaemonServer({
                   mediaDurationSeconds: extracted.mediaDurationSeconds ?? null,
                   diagnostics: extracted.diagnostics,
                 },
+                ...(slidesPayload ? { slides: slidesPayload } : {}),
               },
               cors
             )
@@ -527,6 +578,7 @@ export async function runDaemonServer({
           language: languageRaw,
           model: modelOverride,
           includeContent: includeContentLog,
+          slides: Boolean(slidesSettings),
         })
 
         json(res, 200, { ok: true, id: session.id }, cors)
@@ -534,6 +586,13 @@ export async function runDaemonServer({
         void (async () => {
           try {
             let emittedOutput = false
+            const slideLogState: {
+              startedAt: number | null
+              requested: boolean
+            } = {
+              startedAt: null,
+              requested: Boolean(slidesSettings),
+            }
             const sink = {
               writeChunk: (chunk: string) => {
                 emittedOutput = true
@@ -589,6 +648,12 @@ export async function runDaemonServer({
               : cacheState
 
             const runWithMode = async (resolved: 'url' | 'page') => {
+              if (resolved === 'url' && slideLogState.requested) {
+                slideLogState.startedAt = Date.now()
+                console.log(
+                  `[summarize-daemon] slides: start url=${pageUrl} (session=${session.id})`
+                )
+              }
               return resolved === 'url'
                 ? await streamSummaryForUrl({
                     env,
@@ -602,13 +667,34 @@ export async function runDaemonServer({
                     sink,
                     cache: requestCache,
                     overrides,
-                    hooks: includeContentLog
-                      ? {
-                          onExtracted: (content) => {
-                            logExtracted = content as unknown as Record<string, unknown>
-                          },
+                    slides: slidesSettings,
+                    hooks: {
+                      ...(includeContentLog
+                        ? {
+                            onExtracted: (content) => {
+                              logExtracted = content as unknown as Record<string, unknown>
+                            },
+                          }
+                        : {}),
+                      onSlidesExtracted: (slides) => {
+                        session.slides = slides
+                        if (slideLogState.startedAt) {
+                          const elapsedMs = Date.now() - slideLogState.startedAt
+                          console.log(
+                            `[summarize-daemon] slides: done count=${slides.slides.length} ocr=${slides.ocrAvailable} elapsedMs=${elapsedMs} warnings=${slides.warnings.join('; ')}`
+                          )
                         }
-                      : null,
+                        emitSlides(
+                          session,
+                          buildSlidesPayload({
+                            slides,
+                            port,
+                            sessionId: session.id,
+                          }),
+                          onSessionEvent
+                        )
+                      },
+                    },
                   })
                 : await streamSummaryForVisiblePage({
                     env,
@@ -712,66 +798,6 @@ export async function runDaemonServer({
         return
       }
 
-      if (req.method === 'POST' && pathname === '/v1/agent/history') {
-        let body: unknown
-        try {
-          body = await readJsonBody(req, 4_000_000)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          json(res, 400, { ok: false, error: message }, cors)
-          return
-        }
-        if (!body || typeof body !== 'object') {
-          json(res, 400, { ok: false, error: 'invalid json' }, cors)
-          return
-        }
-
-        const obj = body as Record<string, unknown>
-        const pageUrl = typeof obj.url === 'string' ? obj.url.trim() : ''
-        const pageContent = typeof obj.pageContent === 'string' ? obj.pageContent : ''
-        const cacheContent =
-          typeof obj.cacheContent === 'string' && obj.cacheContent.trim().length > 0
-            ? obj.cacheContent
-            : pageContent
-        const modelOverride = typeof obj.model === 'string' ? obj.model.trim() : null
-        const lengthRaw = obj.length
-        const languageRaw = obj.language
-        const automationEnabled = Boolean(obj.automationEnabled)
-
-        if (!pageUrl) {
-          json(res, 400, { ok: false, error: 'missing url' }, cors)
-          return
-        }
-
-        const cacheStore = cacheState.mode === 'default' ? cacheState.store : null
-        if (!cacheStore) {
-          json(res, 200, { ok: true, messages: null }, cors)
-          return
-        }
-
-        const cacheKey = buildChatCacheKey({
-          cacheContent,
-          model: modelOverride,
-          length: lengthRaw,
-          language: languageRaw,
-          automationEnabled,
-        })
-        const cached = cacheStore.getJson<unknown>('chat', cacheKey)
-        if (!cached) {
-          json(res, 200, { ok: true, messages: null }, cors)
-          return
-        }
-        const messages = Array.isArray(cached)
-          ? cached
-          : typeof cached === 'object' &&
-              cached &&
-              Array.isArray((cached as { messages?: unknown }).messages)
-            ? (cached as { messages: unknown[] }).messages
-            : null
-        json(res, 200, { ok: true, messages }, cors)
-        return
-      }
-
       if (req.method === 'POST' && pathname === '/v1/agent') {
         let body: unknown
         try {
@@ -790,59 +816,20 @@ export async function runDaemonServer({
         const pageUrl = typeof obj.url === 'string' ? obj.url.trim() : ''
         const pageTitle = typeof obj.title === 'string' ? obj.title.trim() : null
         const pageContent = typeof obj.pageContent === 'string' ? obj.pageContent : ''
-        const cacheContent =
-          typeof obj.cacheContent === 'string' && obj.cacheContent.trim().length > 0
-            ? obj.cacheContent
-            : pageContent
         const messages = obj.messages
         const modelOverride = typeof obj.model === 'string' ? obj.model.trim() : null
-        const lengthRaw = obj.length
-        const languageRaw = obj.language
         const tools = Array.isArray(obj.tools)
           ? obj.tools.filter((tool): tool is string => typeof tool === 'string')
           : []
         const automationEnabled = Boolean(obj.automationEnabled)
-        const cacheStore = cacheState.mode === 'default' ? cacheState.store : null
-        const cacheKey = cacheStore
-          ? buildChatCacheKey({
-              cacheContent,
-              model: modelOverride,
-              length: lengthRaw,
-              language: languageRaw,
-              automationEnabled,
-            })
-          : null
 
         if (!pageUrl) {
           json(res, 400, { ok: false, error: 'missing url' }, cors)
           return
         }
 
-        res.writeHead(200, {
-          ...cors,
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-cache, no-transform',
-          connection: 'keep-alive',
-        })
-
-        const controller = new AbortController()
-        let closed = false
-        const close = () => {
-          if (closed) return
-          closed = true
-          controller.abort()
-        }
-        req.on('close', close)
-        req.on('aborted', close)
-
-        const writeEvent = (event: SseEvent) => {
-          if (closed) return
-          res.write(encodeSseEvent(event))
-        }
-
-        let finalAssistant: AssistantMessage | null = null
         try {
-          await streamAgentResponse({
+          const assistant = await completeAgentResponse({
             env,
             pageUrl,
             pageTitle,
@@ -852,27 +839,60 @@ export async function runDaemonServer({
               modelOverride && modelOverride.toLowerCase() !== 'auto' ? modelOverride : null,
             tools,
             automationEnabled,
-            onChunk: (text) => writeEvent({ event: 'chunk', data: { text } }),
-            onAssistant: (assistant) => {
-              finalAssistant = assistant
-              writeEvent({ event: 'assistant', data: assistant })
-            },
-            signal: controller.signal,
           })
-          if (cacheStore && cacheKey && finalAssistant) {
-            const history = filterChatHistoryMessages(messages)
-            history.push(finalAssistant)
-            cacheStore.setJson('chat', cacheKey, { messages: history }, cacheState.ttlMs)
-          }
-          writeEvent({ event: 'done', data: {} })
+          json(res, 200, { ok: true, assistant }, cors)
         } catch (error) {
-          if (!controller.signal.aborted) {
-            const message = error instanceof Error ? error.message : String(error)
-            writeEvent({ event: 'error', data: { message } })
-            console.error('[summarize-daemon] agent stream failed', error)
-          }
-        } finally {
-          if (!closed) res.end()
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('[summarize-daemon] agent failed', error)
+          json(res, 500, { ok: false, error: message }, cors)
+        }
+        return
+      }
+
+      const slidesMatch = pathname.match(/^\/v1\/summarize\/([^/]+)\/slides$/)
+      if (req.method === 'GET' && slidesMatch) {
+        const id = slidesMatch[1]
+        const session = id ? sessions.get(id) : null
+        if (!session || !session.slides) {
+          json(res, 404, { ok: false, error: 'not found' }, cors)
+          return
+        }
+        json(
+          res,
+          200,
+          { ok: true, slides: buildSlidesPayload({ slides: session.slides, port, sessionId: id }) },
+          cors
+        )
+        return
+      }
+
+      const slideImageMatch = pathname.match(/^\/v1\/summarize\/([^/]+)\/slides\/(\d+)$/)
+      if (req.method === 'GET' && slideImageMatch) {
+        const id = slideImageMatch[1]
+        const index = Number(slideImageMatch[2])
+        const session = id ? sessions.get(id) : null
+        if (!session || !session.slides || !Number.isFinite(index)) {
+          json(res, 404, { ok: false, error: 'not found' }, cors)
+          return
+        }
+        const slide = session.slides.slides.find((item) => item.index === index)
+        if (!slide) {
+          json(res, 404, { ok: false, error: 'not found' }, cors)
+          return
+        }
+        try {
+          const stat = await fs.stat(slide.imagePath)
+          res.writeHead(200, {
+            'content-type': 'image/png',
+            'content-length': stat.size.toString(),
+            'cache-control': 'no-cache',
+            ...cors,
+          })
+          const stream = createReadStream(slide.imagePath)
+          stream.pipe(res)
+          stream.on('error', () => res.end())
+        } catch {
+          json(res, 404, { ok: false, error: 'not found' }, cors)
         }
         return
       }

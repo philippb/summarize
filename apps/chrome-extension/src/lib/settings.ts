@@ -13,6 +13,7 @@ export type Settings = {
   hoverSummaries: boolean
   chatEnabled: boolean
   automationEnabled: boolean
+  slidesEnabled: boolean
   summaryTimestamps: boolean
   extendedLogging: boolean
   hoverPrompt: string
@@ -188,6 +189,7 @@ export const defaultSettings: Settings = {
   hoverSummaries: false,
   chatEnabled: true,
   automationEnabled: false,
+  slidesEnabled: false,
   summaryTimestamps: true,
   extendedLogging: false,
   hoverPrompt:
@@ -248,6 +250,10 @@ export async function loadSettings(): Promise<Settings> {
       typeof raw.automationEnabled === 'boolean'
         ? raw.automationEnabled
         : defaultSettings.automationEnabled,
+    slidesEnabled:
+      typeof raw.slidesEnabled === 'boolean'
+        ? raw.slidesEnabled
+        : defaultSettings.slidesEnabled,
     summaryTimestamps:
       typeof raw.summaryTimestamps === 'boolean'
         ? raw.summaryTimestamps

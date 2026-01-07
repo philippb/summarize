@@ -33,11 +33,13 @@ type SidepanelLengthPickerProps = {
 type SummarizeControlProps = {
   value: 'page' | 'video'
   mediaAvailable: boolean
+  slidesEnabled: boolean
   videoLabel?: string
   pageWords?: number | null
   videoDurationSeconds?: number | null
   onValueChange: (value: 'page' | 'video') => void
   onSummarize: () => void
+  onToggleSlides: () => void
 }
 
 const lengthPresets = ['short', 'medium', 'long', 'xl', 'xxl', '20k']
@@ -492,11 +494,34 @@ function SidepanelLengthPicker(props: SidepanelLengthPickerProps) {
 }
 
 function SummarizeControl(props: SummarizeControlProps) {
+  const slideToggle = (
+    <button
+      type="button"
+      className="ghost summarizeSlideToggle"
+      aria-pressed={props.slidesEnabled}
+      data-active={props.slidesEnabled ? 'true' : 'false'}
+      disabled={!props.mediaAvailable}
+      title={props.mediaAvailable ? 'Extract slides' : 'Slides available on videos only'}
+      onClick={(event) => {
+        event.preventDefault()
+        props.onToggleSlides()
+      }}
+    >
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <rect x="3" y="4" width="14" height="10" rx="2" />
+        <path d="M6 7h8M6 10h8" />
+      </svg>
+    </button>
+  )
+
   if (!props.mediaAvailable) {
     return (
-      <button type="button" className="ghost summarizeButton" onClick={props.onSummarize}>
-        Summarize
-      </button>
+      <div className="summarizeControlGroup">
+        <button type="button" className="ghost summarizeButton" onClick={props.onSummarize}>
+          Summarize
+        </button>
+        {slideToggle}
+      </div>
     )
   }
 
@@ -590,20 +615,23 @@ function SummarizeControl(props: SummarizeControlProps) {
   } = triggerProps
 
   return (
-    <div className="picker summarizePicker" {...api.getRootProps()}>
-      <button
-        type="button"
-        className="ghost summarizeButton isDropdown"
-        aria-label={`Summarize (${selectedLabel})`}
-        {...rest}
-        onClick={onClick}
-        onPointerDown={onPointerDown}
-        onKeyDown={onKeyDown}
-      >
-        Summarize
-      </button>
-      {portalRoot ? createPortal(content, portalRoot) : content}
-      <select className="pickerHidden" {...api.getHiddenSelectProps()} />
+    <div className="summarizeControlGroup">
+      <div className="picker summarizePicker" {...api.getRootProps()}>
+        <button
+          type="button"
+          className="ghost summarizeButton isDropdown"
+          aria-label={`Summarize (${selectedLabel})`}
+          {...rest}
+          onClick={onClick}
+          onPointerDown={onPointerDown}
+          onKeyDown={onKeyDown}
+        >
+          Summarize
+        </button>
+        {portalRoot ? createPortal(content, portalRoot) : content}
+        <select className="pickerHidden" {...api.getHiddenSelectProps()} />
+      </div>
+      {slideToggle}
     </div>
   )
 }

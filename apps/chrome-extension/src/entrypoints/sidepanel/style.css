@@ -523,6 +523,12 @@ header {
   display: flex;
 }
 
+.summarizeControlGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .summarizeButton {
   position: relative;
 }
@@ -542,6 +548,33 @@ header {
   top: 50%;
   transform: translateY(calc(-50% - 2px)) rotate(45deg);
   pointer-events: none;
+}
+
+.summarizeSlideToggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+}
+
+.summarizeSlideToggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.summarizeSlideToggle[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--btn-border));
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.summarizeSlideToggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 button {
@@ -1368,6 +1401,20 @@ header.isError .progressFill {
   background: rgba(255, 90, 90, 0.75);
 }
 
+.slideNotice {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+
+.slideNotice.hidden {
+  display: none;
+}
+
 main {
   padding: 12px;
   font-size: var(--font-size);
@@ -1820,6 +1867,81 @@ button.setup__pill.isActive {
 
 .chatMessage li {
   margin: 4px 0;
+}
+
+.slideInline {
+  margin: 8px 0 12px;
+  display: block;
+  width: 100%;
+}
+
+.slideInline button {
+  width: 100%;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.slideInline img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.slideInline .slideCaption {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+  border-top: 1px solid var(--border);
+}
+
+.slideModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 12, 14, 0.5);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+}
+
+.slideModal[data-open="true"] {
+  display: flex;
+}
+
+.slideModal__content {
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.slideModal__image {
+  width: 100%;
+  display: block;
+}
+
+.slideModal__body {
+  padding: 14px 16px 18px;
+}
+
+.slideModal__title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.slideModal__text {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--text);
 }
 
 .chatDock {

@@ -6,6 +6,7 @@ import { deriveExtractionUi } from '../run/flows/url/extract.js'
 import { runUrlFlow } from '../run/flows/url/flow.js'
 import { buildUrlPrompt, summarizeExtractedUrl } from '../run/flows/url/summary.js'
 import type { RunOverrides } from '../run/run-settings.js'
+import type { SlideExtractionResult, SlideSettings } from '../slides/index.js'
 
 import { createDaemonUrlFlowContext } from './flow-context.js'
 import { countWords, estimateDurationSecondsFromWords, formatInputSummary } from './meta.js'
@@ -296,6 +297,7 @@ export async function streamSummaryForUrl({
   sink,
   cache,
   overrides,
+  slides,
   hooks,
 }: {
   env: Record<string, string | undefined>
@@ -309,8 +311,10 @@ export async function streamSummaryForUrl({
   sink: StreamSink
   cache: CacheState
   overrides: RunOverrides
+  slides?: SlideSettings | null
   hooks?: {
     onExtracted?: ((extracted: ExtractedLinkContent) => void) | null
+    onSlidesExtracted?: ((slides: SlideExtractionResult) => void) | null
   } | null
 }): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
   const startedAt = Date.now()
@@ -332,6 +336,7 @@ export async function streamSummaryForUrl({
       input.maxCharacters && input.maxCharacters > 0 ? input.maxCharacters : null,
     format,
     overrides,
+    slides,
     hooks: {
       onModelChosen: (modelId) => {
         usedModel = modelId
@@ -342,6 +347,9 @@ export async function streamSummaryForUrl({
         hooks?.onExtracted?.(content)
         sink.writeMeta?.({ inputSummary: buildInputSummaryForExtracted(content) })
         writeStatus?.('Summarizing…')
+      },
+      onSlidesExtracted: (result) => {
+        hooks?.onSlidesExtracted?.(result)
       },
       onLinkPreviewProgress: (event) => {
         const msg = formatProgress(event)
@@ -395,6 +403,8 @@ export async function extractContentForUrl({
   cache,
   overrides,
   format,
+  slides,
+  hooks,
 }: {
   env: Record<string, string | undefined>
   fetchImpl: typeof fetch
@@ -402,8 +412,13 @@ export async function extractContentForUrl({
   cache: CacheState
   overrides: RunOverrides
   format?: 'text' | 'markdown'
-}): Promise<ExtractedLinkContent> {
+  slides?: SlideSettings | null
+  hooks?: {
+    onSlidesExtracted?: ((slides: SlideExtractionResult) => void) | null
+  } | null
+}): Promise<{ extracted: ExtractedLinkContent; slides: SlideExtractionResult | null }> {
   const extractedRef = { value: null as ExtractedLinkContent | null }
+  const slidesRef = { value: null as SlideExtractionResult | null }
 
   const ctx = createDaemonUrlFlowContext({
     env,
@@ -418,9 +433,14 @@ export async function extractContentForUrl({
     format,
     overrides,
     extractOnly: true,
+    slides,
     hooks: {
       onExtracted: (content) => {
         extractedRef.value = content
+      },
+      onSlidesExtracted: (result) => {
+        slidesRef.value = result
+        hooks?.onSlidesExtracted?.(result)
       },
     },
     runStartedAtMs: Date.now(),
@@ -434,5 +454,5 @@ export async function extractContentForUrl({
     throw new Error('Internal error: missing extracted content')
   }
 
-  return extracted
+  return { extracted, slides: slidesRef.value }
 }

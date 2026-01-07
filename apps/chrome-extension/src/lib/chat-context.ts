@@ -24,6 +24,7 @@ export type ChatContextInput = {
   summary?: string | null
   summaryCap: number
   metadata?: ChatContextMetadata
+  slides?: { count: number; text: string } | null
 }
 
 function formatDuration(seconds: number): string {
@@ -137,18 +138,21 @@ export function buildChatPageContent({
   summary,
   summaryCap,
   metadata,
+  slides,
 }: ChatContextInput): string {
   const cleanSummary = typeof summary === 'string' ? summary.trim() : ''
   const cleanTranscript = transcript.trim()
   const metadataBlock = buildMetadataBlock(metadata)
+  const slidesText = slides?.text?.trim() ?? ''
+  const slidesBlock = slidesText.length > 0 ? `Slides (OCR):\n${slidesText}\n\n` : ''
 
   if (!cleanSummary) {
-    return `${metadataBlock}Full transcript:\n${cleanTranscript}`.trim()
+    return `${metadataBlock}${slidesBlock}Full transcript:\n${cleanTranscript}`.trim()
   }
 
   if (summaryCap > 0 && cleanTranscript.length > summaryCap) {
-    return `${metadataBlock}Full transcript:\n${cleanTranscript}`.trim()
+    return `${metadataBlock}${slidesBlock}Full transcript:\n${cleanTranscript}`.trim()
   }
 
-  return `${metadataBlock}Summary (auto-generated):\n${cleanSummary}\n\nFull transcript:\n${cleanTranscript}`.trim()
+  return `${metadataBlock}${slidesBlock}Summary (auto-generated):\n${cleanSummary}\n\nFull transcript:\n${cleanTranscript}`.trim()
 }

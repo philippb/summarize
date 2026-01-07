@@ -55,6 +55,7 @@ const defaultUiState: UiState = {
     hoverSummaries: false,
     chatEnabled: true,
     automationEnabled: false,
+    slidesEnabled: false,
     model: 'auto',
     length: 'xl',
     tokenPresent: true,

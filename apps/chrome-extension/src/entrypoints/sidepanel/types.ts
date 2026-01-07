@@ -1,4 +1,5 @@
 import type { Message } from '@mariozechner/pi-ai'
+import type { SseSlidesData } from '../../../../../src/shared/sse-events.js'
 
 export type UiState = {
   panelOpen: boolean
@@ -11,6 +12,7 @@ export type UiState = {
     hoverSummaries: boolean
     chatEnabled: boolean
     automationEnabled: boolean
+    slidesEnabled: boolean
     fontSize: number
     lineHeight: number
     model: string
@@ -38,6 +40,7 @@ export type PanelState = {
   lastMeta: { inputSummary: string | null; model: string | null; modelLabel: string | null }
   summaryMarkdown: string | null
   summaryFromCache: boolean | null
+  slides: SseSlidesData | null
   phase: PanelPhase
   error: string | null
   chatStreaming: boolean

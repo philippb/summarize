@@ -23,6 +23,16 @@ const FFMPEG_TIMEOUT_FALLBACK_MS = 300_000
 const YT_DLP_TIMEOUT_MS = 300_000
 const TESSERACT_TIMEOUT_MS = 120_000
 
+function logSlides(message: string): void {
+  console.log(`[summarize-slides] ${message}`)
+}
+
+function logSlidesTiming(label: string, startedAt: number): number {
+  const elapsedMs = Date.now() - startedAt
+  logSlides(`${label} elapsedMs=${elapsedMs}`)
+  return elapsedMs
+}
+
 type ExtractSlidesArgs = {
   source: SlideSource
   settings: SlideSettings
@@ -88,6 +98,8 @@ export async function extractSlidesForSource({
   tesseractPath,
 }: ExtractSlidesArgs): Promise<SlideExtractionResult> {
   const warnings: string[] = []
+  const totalStartedAt = Date.now()
+  logSlides('pipeline=sequential steps=download->scene-detect->extract-frames->ocr')
 
   const ffmpegBinary = ffmpegPath ?? resolveExecutableInPath('ffmpeg', env)
   if (!ffmpegBinary) {
@@ -104,7 +116,11 @@ export async function extractSlidesForSource({
   }
 
   const slidesDir = path.join(settings.outputDir, source.sourceId)
-  await prepareSlidesDir(slidesDir)
+  {
+    const prepareStartedAt = Date.now()
+    await prepareSlidesDir(slidesDir)
+    logSlidesTiming('prepare output dir', prepareStartedAt)
+  }
 
   let inputPath = source.url
   let cleanupTemp: (() => Promise<void>) | null = null
@@ -113,16 +129,15 @@ export async function extractSlidesForSource({
     if (!ytDlpPath) {
       throw new Error('Slides for YouTube require yt-dlp (set YT_DLP_PATH or install yt-dlp).')
     }
-    const downloaded = await downloadYoutubeVideo({
-      ytDlpPath,
-      url: source.url,
-      timeoutMs,
-    })
+    const downloadStartedAt = Date.now()
+    const downloaded = await downloadYoutubeVideo({ ytDlpPath, url: source.url, timeoutMs })
     inputPath = downloaded.filePath
     cleanupTemp = downloaded.cleanup
+    logSlidesTiming('yt-dlp download (sequential)', downloadStartedAt)
   }
 
   try {
+    const ffmpegStartedAt = Date.now()
     const { slides: rawSlides, autoTune } = await extractSlidesWithFfmpeg({
       ffmpegPath: ffmpegBinary,
       ffprobePath: ffprobeBinary,
@@ -137,8 +152,11 @@ export async function extractSlidesForSource({
       timeoutMs,
       warnings,
     })
+    logSlidesTiming('ffmpeg scene-detect + extract-frames (sequential)', ffmpegStartedAt)
 
+    const renameStartedAt = Date.now()
     const renamedSlides = await renameSlidesWithTimestamps(rawSlides, slidesDir)
+    logSlidesTiming('rename slides', renameStartedAt)
     if (renamedSlides.length === 0) {
       throw new Error('No slides extracted; try lowering --slides-scene-threshold.')
     }
@@ -146,7 +164,13 @@ export async function extractSlidesForSource({
     let slidesWithOcr = renamedSlides
     const ocrAvailable = Boolean(tesseractPath)
     if (settings.ocr && tesseractPath) {
+      const ocrStartedAt = Date.now()
+      logSlides(`ocr start count=${renamedSlides.length} mode=sequential`)
       slidesWithOcr = await runOcrOnSlides(renamedSlides, tesseractPath)
+      const elapsedMs = logSlidesTiming('ocr done', ocrStartedAt)
+      if (renamedSlides.length > 0) {
+        logSlides(`ocr avgMsPerSlide=${Math.round(elapsedMs / renamedSlides.length)}`)
+      }
     }
 
     const result: SlideExtractionResult = {
@@ -166,6 +190,7 @@ export async function extractSlidesForSource({
     }
 
     await writeSlidesJson(result, slidesDir)
+    logSlidesTiming('slides total', totalStartedAt)
     return result
   } finally {
     if (cleanupTemp) {
@@ -282,13 +307,16 @@ async function extractSlidesWithFfmpeg({
     ? uniqueThresholds([sceneThreshold, 0.2, 0.15, 0.1, 0.05])
     : [sceneThreshold]
 
+  const probeStartedAt = Date.now()
   const videoInfo = await probeVideoInfo({
     ffprobePath,
     env,
     inputPath,
     timeoutMs,
   })
+  logSlidesTiming('ffprobe video info', probeStartedAt)
 
+  const baseEvalStartedAt = Date.now()
   const baseEvaluation = await evaluateSceneThresholds({
     ffmpegPath,
     inputPath,
@@ -299,6 +327,7 @@ async function extractSlidesWithFfmpeg({
     crop: null,
     warnings,
   })
+  logSlidesTiming(`scene detection base (thresholds=${thresholds.length})`, baseEvalStartedAt)
 
   let chosenThreshold = baseEvaluation.threshold
   let sceneTimestamps = baseEvaluation.timestamps
@@ -319,6 +348,7 @@ async function extractSlidesWithFfmpeg({
       }
 
   if (autoTuneThreshold && baseEvaluation.confidence < 0.6) {
+    const roiStartedAt = Date.now()
     const roi = await detectSlideRoiWithLlm({
       ffmpegPath,
       inputPath,
@@ -327,9 +357,11 @@ async function extractSlidesWithFfmpeg({
       warnings,
       timeoutMs,
     })
+    logSlidesTiming('roi detect (llm)', roiStartedAt)
     if (roi && videoInfo.width && videoInfo.height) {
       const crop = resolveCropFromRoi(roi, videoInfo)
       if (crop) {
+        const roiEvalStartedAt = Date.now()
         const roiEvaluation = await evaluateSceneThresholds({
           ffmpegPath,
           inputPath,
@@ -340,6 +372,7 @@ async function extractSlidesWithFfmpeg({
           crop,
           warnings,
         })
+        logSlidesTiming(`scene detection roi (thresholds=${thresholds.length})`, roiEvalStartedAt)
         if (roiEvaluation.confidence >= baseEvaluation.confidence + 0.05) {
           chosenThreshold = roiEvaluation.threshold
           sceneTimestamps = roiEvaluation.timestamps
@@ -369,6 +402,7 @@ async function extractSlidesWithFfmpeg({
     maxSlides,
     warnings
   )
+  const extractFramesStartedAt = Date.now()
   const extracted = await extractFramesAtTimestamps({
     ffmpegPath,
     inputPath,
@@ -376,6 +410,13 @@ async function extractSlidesWithFfmpeg({
     timestamps: trimmed.map((slide) => slide.timestamp),
     timeoutMs,
   })
+  const extractElapsedMs = logSlidesTiming(
+    `extract frames (count=${trimmed.length}, sequential)`,
+    extractFramesStartedAt
+  )
+  if (trimmed.length > 0) {
+    logSlides(`extract frames avgMsPerFrame=${Math.round(extractElapsedMs / trimmed.length)}`)
+  }
   const filtered = applyMinDurationFilter(extracted, minDurationSeconds, warnings)
   return { slides: filtered, autoTune }
 }
@@ -394,6 +435,7 @@ async function extractFramesAtTimestamps({
   timeoutMs: number
 }): Promise<SlideImage[]> {
   const slides: SlideImage[] = []
+  const startedAt = Date.now()
   for (let i = 0; i < timestamps.length; i += 1) {
     const timestamp = timestamps[i]
     const outputPath = path.join(outputDir, `slide_${String(i + 1).padStart(4, '0')}.png`)
@@ -419,6 +461,7 @@ async function extractFramesAtTimestamps({
     })
     slides.push({ index: i + 1, timestamp, imagePath: outputPath })
   }
+  logSlidesTiming(`extract frame loop (count=${timestamps.length})`, startedAt)
   return slides
 }
 
