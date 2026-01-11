@@ -206,7 +206,7 @@ chrome.permissions.contains({ permissions: ['userScripts'] })
 - Always visible in sidebar area (left side by default)
 - Programmatically controlled via `sidebarAction.toggle()`, `open()`, `close()`
 - Toggles on toolbar icon click (implemented)
-- Keyboard shortcut: `Ctrl+Shift+S` (customizable by user)
+- Keyboard shortcut: `Ctrl+Shift+U` (customizable by user)
 - Different width constraints than Chrome
 
 **Impact**: Minimal - both browsers now support programmatic control and icon-click toggling

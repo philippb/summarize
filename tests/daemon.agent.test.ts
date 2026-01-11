@@ -5,8 +5,10 @@ import type { AssistantMessage, Tool } from '@mariozechner/pi-ai'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { completeAgentResponse } from '../src/daemon/agent.js'
 
-const mockCompleteSimple = vi.fn()
-const mockGetModel = vi.fn()
+const { mockCompleteSimple, mockGetModel } = vi.hoisted(() => ({
+  mockCompleteSimple: vi.fn(),
+  mockGetModel: vi.fn(),
+}))
 
 vi.mock('@mariozechner/pi-ai', () => {
   return {

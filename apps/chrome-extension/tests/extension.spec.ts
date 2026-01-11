@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noEmptyPattern: Playwright test fixtures require object destructuring
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,8 +8,14 @@ import { chromium, expect, firefox, test } from '@playwright/test'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const consoleErrorAllowlist: RegExp[] = []
+const allowFirefoxExtensionTests = process.env.ALLOW_FIREFOX_EXTENSION_TESTS === '1'
 
 type BrowserType = 'chromium' | 'firefox'
+
+test.skip(
+  ({ browserName }) => browserName === 'firefox' && !allowFirefoxExtensionTests,
+  'Firefox extension tests are blocked by Playwright limitations. Set ALLOW_FIREFOX_EXTENSION_TESTS=1 to run.'
+)
 
 type ExtensionHarness = {
   context: BrowserContext
@@ -171,9 +176,7 @@ async function launchExtension(browser: BrowserType = 'chromium'): Promise<Exten
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
 
     extensionId =
-      manifest.browser_specific_settings?.gecko?.id ||
-      manifest.applications?.gecko?.id ||
-      ''
+      manifest.browser_specific_settings?.gecko?.id || manifest.applications?.gecko?.id || ''
 
     if (!extensionId) {
       throw new Error(
@@ -396,7 +399,7 @@ async function closeExtension(context: BrowserContext, userDataDir: string) {
   fs.rmSync(userDataDir, { recursive: true, force: true })
 }
 
-test('sidepanel loads without runtime errors', async ({}, testInfo) => {
+test('sidepanel loads without runtime errors', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -408,7 +411,7 @@ test('sidepanel loads without runtime errors', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel hides chat dock when chat is disabled', async ({}, testInfo) => {
+test('sidepanel hides chat dock when chat is disabled', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -422,7 +425,7 @@ test('sidepanel hides chat dock when chat is disabled', async ({}, testInfo) => 
   }
 })
 
-test('sidepanel updates chat visibility when settings change', async ({}, testInfo) => {
+test('sidepanel updates chat visibility when settings change', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -439,7 +442,7 @@ test('sidepanel updates chat visibility when settings change', async ({}, testIn
   }
 })
 
-test('sidepanel scheme picker supports keyboard selection', async ({}, testInfo) => {
+test('sidepanel scheme picker supports keyboard selection', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -465,7 +468,7 @@ test('sidepanel scheme picker supports keyboard selection', async ({}, testInfo)
   }
 })
 
-test('sidepanel refresh free models from advanced settings', async ({}, testInfo) => {
+test('sidepanel refresh free models from advanced settings', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -548,7 +551,7 @@ test('sidepanel refresh free models from advanced settings', async ({}, testInfo
   }
 })
 
-test('sidepanel refresh free shows error on failure', async ({}, testInfo) => {
+test('sidepanel refresh free shows error on failure', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -609,7 +612,7 @@ test('sidepanel refresh free shows error on failure', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel mode picker updates theme mode', async ({}, testInfo) => {
+test('sidepanel mode picker updates theme mode', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -637,7 +640,7 @@ test('sidepanel mode picker updates theme mode', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel custom length input accepts typing', async ({}, testInfo) => {
+test('sidepanel custom length input accepts typing', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -665,7 +668,7 @@ test('sidepanel custom length input accepts typing', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel updates title after stream when tab title changes', async ({}, testInfo) => {
+test('sidepanel updates title after stream when tab title changes', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -724,7 +727,7 @@ test('sidepanel updates title after stream when tab title changes', async ({}, t
   }
 })
 
-test('sidepanel clears summary when tab url changes', async ({}, testInfo) => {
+test('sidepanel clears summary when tab url changes', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -781,7 +784,7 @@ test('sidepanel clears summary when tab url changes', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel video selection forces transcript mode', async ({}, testInfo) => {
+test('sidepanel video selection forces transcript mode', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -843,7 +846,7 @@ test('sidepanel video selection forces transcript mode', async ({}, testInfo) =>
   }
 })
 
-test('sidepanel shows an error when agent request fails', async ({}, testInfo) => {
+test('sidepanel shows an error when agent request fails', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -884,7 +887,7 @@ test('sidepanel shows an error when agent request fails', async ({}, testInfo) =
   }
 })
 
-test('sidepanel shows daemon upgrade hint when /v1/agent is missing', async ({}, testInfo) => {
+test('sidepanel shows daemon upgrade hint when /v1/agent is missing', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -925,7 +928,7 @@ test('sidepanel shows daemon upgrade hint when /v1/agent is missing', async ({},
   }
 })
 
-test('sidepanel shows automation notice when permission event fires', async ({}, testInfo) => {
+test('sidepanel shows automation notice when permission event fires', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -950,7 +953,7 @@ test('sidepanel shows automation notice when permission event fires', async ({},
   }
 })
 
-test('sidepanel chat queue sends next message after stream completes', async ({}, testInfo) => {
+test('sidepanel chat queue sends next message after stream completes', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1013,7 +1016,7 @@ test('sidepanel chat queue sends next message after stream completes', async ({}
   }
 })
 
-test('sidepanel chat queue drains messages after stream completes', async ({}, testInfo) => {
+test('sidepanel chat queue drains messages after stream completes', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1079,7 +1082,7 @@ test('sidepanel chat queue drains messages after stream completes', async ({}, t
   }
 })
 
-test('sidepanel clears chat on user navigation', async ({}, testInfo) => {
+test('sidepanel clears chat on user navigation', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1137,7 +1140,7 @@ test('sidepanel clears chat on user navigation', async ({}, testInfo) => {
   }
 })
 
-test('auto summarize reruns after panel reopen', async ({}, testInfo) => {
+test('auto summarize reruns after panel reopen', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1196,7 +1199,7 @@ test('auto summarize reruns after panel reopen', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel updates title while streaming on same URL', async ({}, testInfo) => {
+test('sidepanel updates title while streaming on same URL', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1258,7 +1261,7 @@ test('sidepanel updates title while streaming on same URL', async ({}, testInfo)
   }
 })
 
-test('hover tooltip proxies daemon calls via background (no page-origin localhost fetch)', async ({}, testInfo) => {
+test('hover tooltip proxies daemon calls via background (no page-origin localhost fetch)', async (_args, testInfo) => {
   test.setTimeout(30_000)
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
@@ -1325,7 +1328,7 @@ test('hover tooltip proxies daemon calls via background (no page-origin localhos
   }
 })
 
-test('content script extracts visible duration metadata', async ({}, testInfo) => {
+test('content script extracts visible duration metadata', async (_args, testInfo) => {
   test.setTimeout(45_000)
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
@@ -1373,7 +1376,7 @@ test('content script extracts visible duration metadata', async ({}, testInfo) =
   }
 })
 
-test('options pickers support keyboard selection', async ({}, testInfo) => {
+test('options pickers support keyboard selection', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1411,7 +1414,7 @@ test('options pickers support keyboard selection', async ({}, testInfo) => {
   }
 })
 
-test('options keeps custom model selected while presets refresh', async ({}, testInfo) => {
+test('options keeps custom model selected while presets refresh', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1474,7 +1477,7 @@ test('options keeps custom model selected while presets refresh', async ({}, tes
   }
 })
 
-test('options persists automation toggle without save', async ({}, testInfo) => {
+test('options persists automation toggle without save', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1505,7 +1508,7 @@ test('options persists automation toggle without save', async ({}, testInfo) => 
   }
 })
 
-test('options disables automation permissions button when granted', async ({}, testInfo) => {
+test('options disables automation permissions button when granted', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1541,7 +1544,7 @@ test('options disables automation permissions button when granted', async ({}, t
   }
 })
 
-test('options shows user scripts guidance when unavailable', async ({}, testInfo) => {
+test('options shows user scripts guidance when unavailable', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1576,7 +1579,7 @@ test('options shows user scripts guidance when unavailable', async ({}, testInfo
   }
 })
 
-test('options scheme list renders chips', async ({}, testInfo) => {
+test('options scheme list renders chips', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1601,7 +1604,7 @@ test('options scheme list renders chips', async ({}, testInfo) => {
   }
 })
 
-test('options footer links to summarize site', async ({}, testInfo) => {
+test('options footer links to summarize site', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
@@ -1614,7 +1617,7 @@ test('options footer links to summarize site', async ({}, testInfo) => {
   }
 })
 
-test('sidepanel auto summarize toggle stays inline', async ({}, testInfo) => {
+test('sidepanel auto summarize toggle stays inline', async (_args, testInfo) => {
   const harness = await launchExtension(getBrowserFromProject(testInfo.project.name))
 
   try {
