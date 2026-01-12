@@ -9,6 +9,7 @@
 - Summaries: when transcript timestamps are available, prompts require timestamped bullet summaries; side panel auto-links `[mm:ss]` in summaries for media.
 - Chrome automation: add artifacts tool + REPL helpers for persistent session files (notes/JSON/CSV) and downloads.
 - Chrome automation: expand navigate tool with list/switch tab support and return matching skills after navigation.
+- CLI: transcribe local audio/video files with mtime-aware transcript cache invalidation (thanks @mvance!).
 
 ### Fixes
 

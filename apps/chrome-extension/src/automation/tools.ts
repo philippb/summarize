@@ -1,5 +1,7 @@
 import type { ToolCall, ToolResultMessage } from '@mariozechner/pi-ai'
 import { parseSseEvent } from '../../../../src/shared/sse-events.js'
+import { loadSettings } from '../lib/settings'
+import { parseSseStream } from '../lib/sse'
 import {
   deleteArtifact,
   getArtifactRecord,
@@ -7,8 +9,6 @@ import {
   parseArtifact,
   upsertArtifact,
 } from './artifacts-store'
-import { loadSettings } from '../lib/settings'
-import { parseSseStream } from '../lib/sse'
 import { executeAskUserWhichElementTool } from './ask-user-which-element'
 import { executeNavigateTool } from './navigate'
 import { executeReplTool } from './repl'
@@ -246,7 +246,9 @@ function formatArtifactValue(value: unknown): string {
 }
 
 // Artifacts are stored per active tab session and can be created/updated from both REPL and tools.
-async function executeArtifactsTool(args: ArtifactsToolArgs): Promise<{ text: string; details?: unknown }> {
+async function executeArtifactsTool(
+  args: ArtifactsToolArgs
+): Promise<{ text: string; details?: unknown }> {
   const tabId = await getActiveTabId()
   const action = args.action
 
@@ -261,7 +263,9 @@ async function executeArtifactsTool(args: ArtifactsToolArgs): Promise<{ text: st
     const text =
       items.length === 0
         ? 'No artifacts found.'
-        : items.map((item) => `- ${item.fileName} (${item.mimeType}, ${item.size} bytes)`).join('\n')
+        : items
+            .map((item) => `- ${item.fileName} (${item.mimeType}, ${item.size} bytes)`)
+            .join('\n')
     return { text, details: { artifacts: items } }
   }
 
@@ -308,7 +312,9 @@ async function executeArtifactsTool(args: ArtifactsToolArgs): Promise<{ text: st
 
   if (action === 'delete') {
     const deleted = await deleteArtifact(tabId, args.fileName)
-    return { text: deleted ? `Deleted artifact ${args.fileName}` : `Artifact not found: ${args.fileName}` }
+    return {
+      text: deleted ? `Deleted artifact ${args.fileName}` : `Artifact not found: ${args.fileName}`,
+    }
   }
 
   throw new Error(`Unknown artifacts action: ${action}`)
@@ -374,7 +380,12 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ToolResultMes
   try {
     if (toolCall.name === 'navigate') {
       const result = await executeNavigateTool(
-        toolCall.arguments as { url?: string; newTab?: boolean; listTabs?: boolean; switchToTab?: number }
+        toolCall.arguments as {
+          url?: string
+          newTab?: boolean
+          listTabs?: boolean
+          switchToTab?: number
+        }
       )
       let text = ''
       if (result.tabs) {
@@ -391,7 +402,9 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ToolResultMes
       }
 
       if (result.skills && result.skills.length > 0) {
-        const skillLines = result.skills.map((skill) => `- ${skill.name}: ${skill.shortDescription}`)
+        const skillLines = result.skills.map(
+          (skill) => `- ${skill.name}: ${skill.shortDescription}`
+        )
         text = `${text}\n\nSkills:\n${skillLines.join('\n')}`
       }
       return buildToolResultMessage({

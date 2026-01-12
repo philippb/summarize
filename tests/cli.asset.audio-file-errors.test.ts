@@ -1,5 +1,5 @@
 /**
- * Phase 4.5: Error scenario tests for audio file transcription
+ * Phase 4.5: Error scenario tests for media file transcription
  * Tests edge cases and error conditions to ensure robust error handling
  */
 
@@ -22,7 +22,10 @@ const mocks = vi.hoisted(() => ({
 mocks.streamSimple.mockImplementation(() =>
   makeTextDeltaStream(
     ['Audio error test'],
-    makeAssistantMessage({ text: 'Audio error test', usage: { input: 50, output: 10, totalTokens: 60 } })
+    makeAssistantMessage({
+      text: 'Audio error test',
+      usage: { input: 50, output: 10, totalTokens: 60 },
+    })
   )
 )
 
@@ -44,7 +47,7 @@ function collectStream() {
   return { stream, getText: () => text }
 }
 
-describe('Audio file error handling', () => {
+describe('Media file error handling', () => {
   it('handles non-existent audio files gracefully', async () => {
     mocks.streamSimple.mockClear()
 
@@ -141,14 +144,14 @@ describe('Audio file error handling', () => {
     expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 
-   it('handles audio files with various path scenarios', async () => {
-     mocks.streamSimple.mockClear()
+  it('handles audio files with various path scenarios', async () => {
+    mocks.streamSimple.mockClear()
 
-     const root = mkdtempSync(join(tmpdir(), 'summarize-audio-symlink-'))
-     const audioPath = join(root, 'audio.mp3')
-     writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
+    const root = mkdtempSync(join(tmpdir(), 'summarize-audio-symlink-'))
+    const audioPath = join(root, 'audio.mp3')
+    writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
 
-     // This test verifies basic file path handling
+    // This test verifies basic file path handling
     const stdout = collectStream()
     const stderr = collectStream()
 
@@ -194,60 +197,60 @@ describe('Audio file error handling', () => {
     expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
   })
 
-   it('handles file modification time edge cases (very old files)', async () => {
-     mocks.streamSimple.mockClear()
+  it('handles file modification time edge cases (very old files)', async () => {
+    mocks.streamSimple.mockClear()
 
-     const root = mkdtempSync(join(tmpdir(), 'summarize-audio-old-file-'))
-     const audioPath = join(root, 'old.mp3')
-     writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
+    const root = mkdtempSync(join(tmpdir(), 'summarize-audio-old-file-'))
+    const audioPath = join(root, 'old.mp3')
+    writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
 
-     // Set mtime to January 1, 2000 to test edge case of very old files
-     const oldDate = new Date('2000-01-01T00:00:00Z')
-     utimesSync(audioPath, oldDate, oldDate)
+    // Set mtime to January 1, 2000 to test edge case of very old files
+    const oldDate = new Date('2000-01-01T00:00:00Z')
+    utimesSync(audioPath, oldDate, oldDate)
 
-     const stdout = collectStream()
-     const stderr = collectStream()
+    const stdout = collectStream()
+    const stderr = collectStream()
 
-     const run = () =>
-       runCli(['--model', 'openai/gpt-4o-mini', '--timeout', '2s', audioPath], {
-         env: { HOME: root }, // No transcription provider
-         fetch: vi.fn(async () => {
-           throw new Error('unexpected fetch')
-         }) as unknown as typeof fetch,
-         stdout: stdout.stream,
-         stderr: stderr.stream,
-       })
+    const run = () =>
+      runCli(['--model', 'openai/gpt-4o-mini', '--timeout', '2s', audioPath], {
+        env: { HOME: root }, // No transcription provider
+        fetch: vi.fn(async () => {
+          throw new Error('unexpected fetch')
+        }) as unknown as typeof fetch,
+        stdout: stdout.stream,
+        stderr: stderr.stream,
+      })
 
-     // Should handle old file mtimes gracefully
-     // (mtime collection should work regardless of file age)
-     await expect(run()).rejects.toThrow()
-     expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
-   })
+    // Should handle old file mtimes gracefully
+    // (mtime collection should work regardless of file age)
+    await expect(run()).rejects.toThrow()
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
+  })
 
-   it('properly formats error messages for unsupported audio codecs', async () => {
-     mocks.streamSimple.mockClear()
+  it('properly formats error messages for unsupported audio codecs', async () => {
+    mocks.streamSimple.mockClear()
 
-     const root = mkdtempSync(join(tmpdir(), 'summarize-audio-unsupported-'))
-     const audioPath = join(root, 'unsupported.mp3')
-     writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
+    const root = mkdtempSync(join(tmpdir(), 'summarize-audio-unsupported-'))
+    const audioPath = join(root, 'unsupported.mp3')
+    writeFileSync(audioPath, Buffer.from([0xff, 0xfb, 0x10, 0x00]))
 
-     const stdout = collectStream()
-     const stderr = collectStream()
+    const stdout = collectStream()
+    const stderr = collectStream()
 
-     const run = () =>
-       runCli(['--model', 'openai/gpt-4o-mini', '--timeout', '2s', audioPath], {
-         env: { HOME: root }, // No transcription provider
-         fetch: vi.fn(async () => {
-           throw new Error('unexpected fetch')
-         }) as unknown as typeof fetch,
-         stdout: stdout.stream,
-         stderr: stderr.stream,
-       })
+    const run = () =>
+      runCli(['--model', 'openai/gpt-4o-mini', '--timeout', '2s', audioPath], {
+        env: { HOME: root }, // No transcription provider
+        fetch: vi.fn(async () => {
+          throw new Error('unexpected fetch')
+        }) as unknown as typeof fetch,
+        stdout: stdout.stream,
+        stderr: stderr.stream,
+      })
 
-     // Should fail at provider check before codec detection
-     await expect(run()).rejects.toThrow(/transcription requires/)
-     expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
-   })
+    // Should fail at provider check before codec detection
+    await expect(run()).rejects.toThrow(/transcription requires/)
+    expect(mocks.streamSimple).toHaveBeenCalledTimes(0)
+  })
 
   it('handles concurrent file access gracefully', async () => {
     mocks.streamSimple.mockClear()

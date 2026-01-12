@@ -193,7 +193,10 @@ const TOOL_DEFINITIONS: Record<string, Tool> = {
           enum: ['list', 'get', 'create', 'update', 'delete'],
           description: 'Action to perform',
         },
-        fileName: { type: 'string', description: 'Artifact filename (required for get/create/update/delete)' },
+        fileName: {
+          type: 'string',
+          description: 'Artifact filename (required for get/create/update/delete)',
+        },
         content: {
           description: 'Content to store (string or JSON-serializable object)',
           type: ['string', 'object', 'array', 'number', 'boolean', 'null'],

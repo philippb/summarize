@@ -1476,7 +1476,9 @@ test('options disables automation permissions button when granted', async () => 
     await page.waitForSelector('#pickersRoot')
 
     await expect(page.locator('#automationPermissions')).toBeDisabled()
-    await expect(page.locator('#automationPermissions')).toHaveText('Automation permissions granted')
+    await expect(page.locator('#automationPermissions')).toHaveText(
+      'Automation permissions granted'
+    )
     await expect(page.locator('#userScriptsNotice')).toBeHidden()
     assertNoErrors(harness)
   } finally {

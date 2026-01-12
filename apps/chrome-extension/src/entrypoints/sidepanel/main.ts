@@ -239,12 +239,14 @@ function showAutomationNotice({
 }
 
 window.addEventListener('summarize:automation-permissions', (event) => {
-  const detail = (event as CustomEvent<{
-    title?: string
-    message?: string
-    ctaLabel?: string
-    ctaAction?: AutomationNoticeAction
-  }>).detail
+  const detail = (
+    event as CustomEvent<{
+      title?: string
+      message?: string
+      ctaLabel?: string
+      ctaAction?: AutomationNoticeAction
+    }>
+  ).detail
   if (!detail?.message) return
   showAutomationNotice({
     title: detail.title ?? 'Automation permission required',
@@ -565,11 +567,7 @@ function notePreserveChatForUrl(url: string | null) {
 
 function shouldPreserveChatForRun(url: string) {
   const pending = pendingPreserveChatForUrl
-  if (
-    pending &&
-    Date.now() - pending.at < AGENT_NAV_TTL_MS &&
-    urlsMatch(url, pending.url)
-  ) {
+  if (pending && Date.now() - pending.at < AGENT_NAV_TTL_MS && urlsMatch(url, pending.url)) {
     pendingPreserveChatForUrl = null
     return true
   }
@@ -1938,7 +1936,7 @@ function handleBgMessage(msg: BgToPanel) {
         finishStreamingMessage()
       }
       return
-    case 'run:start':
+    case 'run:start': {
       lastAction = 'summarize'
       window.clearTimeout(autoKickTimer)
       if (panelState.chatStreaming) {
@@ -1956,6 +1954,7 @@ function handleBgMessage(msg: BgToPanel) {
       panelState.lastMeta = { inputSummary: null, model: null, modelLabel: null }
       void streamController.start(msg.run)
       return
+    }
     case 'agent:response':
       handleAgentResponse(msg)
       return

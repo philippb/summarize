@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { TranscriptCache } from '../packages/core/src/content/cache/types.js'
-import { readTranscriptCache, writeTranscriptCache } from '../packages/core/src/content/transcript/cache.js'
+import {
+  readTranscriptCache,
+  writeTranscriptCache,
+} from '../packages/core/src/content/transcript/cache.js'
 
 describe('transcript cache with file modification time', () => {
   it('includes fileMtime when reading transcript cache', async () => {
@@ -110,7 +113,7 @@ describe('transcript cache with file modification time', () => {
 
   it('omits fileMtime parameter when undefined (optional)', async () => {
     const transcriptCache: TranscriptCache = {
-      get: vi.fn(async (args) => {
+      get: vi.fn(async (_args) => {
         // Should work even if fileMtime not provided
         return {
           content: 'transcript',
@@ -152,131 +155,128 @@ describe('transcript cache with file modification time', () => {
     expect(outcome.diagnostics.cacheStatus).toBe('miss')
   })
 
-   it('preserves fileMtime through cache write operations', async () => {
-     // This test verifies the fileMtime parameter is properly threaded through the system
-     const getCallArgs: unknown[] = []
-     const setCallArgs: unknown[] = []
+  it('preserves fileMtime through cache write operations', async () => {
+    // This test verifies the fileMtime parameter is properly threaded through the system
+    const getCallArgs: unknown[] = []
 
-     const transcriptCache: TranscriptCache = {
-       get: vi.fn(async (args) => {
-         getCallArgs.push(args)
-         return null
-       }),
-       set: vi.fn(async (args) => {
-         setCallArgs.push(args)
-       }),
-     }
+    const transcriptCache: TranscriptCache = {
+      get: vi.fn(async (args) => {
+        getCallArgs.push(args)
+        return null
+      }),
+      set: vi.fn(async () => {}),
+    }
 
-     const fileMtime = 1704268800000
+    const fileMtime = 1704268800000
 
-     // First call: cache miss, would trigger a write
-     await readTranscriptCache({
-       url: 'file:///Users/test/audio.mp3',
-       cacheMode: 'default',
-       transcriptCache,
-       fileMtime,
-     })
+    // First call: cache miss, would trigger a write
+    await readTranscriptCache({
+      url: 'file:///Users/test/audio.mp3',
+      cacheMode: 'default',
+      transcriptCache,
+      fileMtime,
+    })
 
-     // Verify get was called with fileMtime
-     expect(getCallArgs[0]).toEqual(
-       expect.objectContaining({
-         fileMtime,
-       })
-     )
-   })
+    // Verify get was called with fileMtime
+    expect(getCallArgs[0]).toEqual(
+      expect.objectContaining({
+        fileMtime,
+      })
+    )
+  })
 
-   it('write operation calls cache.set with all necessary parameters', async () => {
-     // Verify that cache.set receives all expected parameters including fileMtime
-     const transcriptCache: TranscriptCache = {
-       get: vi.fn(async () => null),
-       set: vi.fn(async () => {}),
-     }
+  it('write operation calls cache.set with all necessary parameters', async () => {
+    // Verify that cache.set receives all expected parameters including fileMtime
+    const transcriptCache: TranscriptCache = {
+      get: vi.fn(async () => null),
+      set: vi.fn(async () => {}),
+    }
 
-     const url = 'file:///Users/test/audio.mp3'
-     const service = 'openai'
-     const fileMtime = 1704268800000
+    const url = 'file:///Users/test/audio.mp3'
+    const service = 'openai'
+    const fileMtime = 1704268800000
 
-     // Perform a write operation with fileMtime
-     await writeTranscriptCache({
-       url,
-       service,
-       resourceKey: null,
-       result: { text: 'test transcript', source: 'openai' },
-       transcriptCache,
-       fileMtime,
-     })
+    // Perform a write operation with fileMtime
+    await writeTranscriptCache({
+      url,
+      service,
+      resourceKey: null,
+      result: { text: 'test transcript', source: 'openai' },
+      transcriptCache,
+      fileMtime,
+    })
 
-     // Verify set was called
-     expect(vi.mocked(transcriptCache.set)).toHaveBeenCalled()
-     const setCall = vi.mocked(transcriptCache.set).mock.calls[0]?.[0]
+    // Verify set was called
+    expect(vi.mocked(transcriptCache.set)).toHaveBeenCalled()
+    const setCall = vi.mocked(transcriptCache.set).mock.calls[0]?.[0]
 
-     // Verify the structure of what was written, including fileMtime
-     expect(setCall).toEqual(
-       expect.objectContaining({
-         url,
-         service,
-         content: 'test transcript',
-         source: 'openai',
-         fileMtime,
-       })
-     )
-   })
+    // Verify the structure of what was written, including fileMtime
+    expect(setCall).toEqual(
+      expect.objectContaining({
+        url,
+        service,
+        content: 'test transcript',
+        source: 'openai',
+        fileMtime,
+      })
+    )
+  })
 
-   it('mtime-based cache invalidation works when cache respects fileMtime in key', async () => {
-     // Verify that readTranscriptCache properly differentiates based on fileMtime
-     // by calling get with different mtimes
-     const getCallLog: Array<{ url: string; fileMtime: number | null | undefined }> = []
+  it('mtime-based cache invalidation works when cache respects fileMtime in key', async () => {
+    // Verify that readTranscriptCache properly differentiates based on fileMtime
+    // by calling get with different mtimes
+    const getCallLog: Array<{ url: string; fileMtime: number | null | undefined }> = []
 
-     const transcriptCache: TranscriptCache = {
-       get: vi.fn(async (args) => {
-         getCallLog.push({ url: args.url, fileMtime: args.fileMtime })
-         // Return different content based on mtime (simulating mtime-aware cache)
-         if (args.fileMtime === 1000) {
-           return {
-             content: 'transcript at mtime 1000',
-             source: 'openai',
-             expired: false,
-             metadata: null,
-           }
-         }
-         if (args.fileMtime === 2000) {
-           // File was re-modified, so we'd return null to trigger re-transcription
-           return null
-         }
-         return null
-       }),
-       set: vi.fn(async () => {}),
-     }
+    const transcriptCache: TranscriptCache = {
+      get: vi.fn(async (args) => {
+        getCallLog.push({ url: args.url, fileMtime: args.fileMtime })
+        // Return different content based on mtime (simulating mtime-aware cache)
+        if (args.fileMtime === 1000) {
+          return {
+            content: 'transcript at mtime 1000',
+            source: 'openai',
+            expired: false,
+            metadata: null,
+          }
+        }
+        if (args.fileMtime === 2000) {
+          // File was re-modified, so we'd return null to trigger re-transcription
+          return null
+        }
+        return null
+      }),
+      set: vi.fn(async () => {}),
+    }
 
-     const url = 'file:///Users/test/audio.mp3'
+    const url = 'file:///Users/test/audio.mp3'
 
-     // First read with mtime 1000
-     const result1 = await readTranscriptCache({
-       url,
-       cacheMode: 'default',
-       transcriptCache,
-       fileMtime: 1000,
-     })
+    // First read with mtime 1000
+    const result1 = await readTranscriptCache({
+      url,
+      cacheMode: 'default',
+      transcriptCache,
+      fileMtime: 1000,
+    })
 
-     expect(result1.resolution?.text).toBe('transcript at mtime 1000')
-     expect(result1.diagnostics.cacheStatus).toBe('hit')
+    expect(result1.resolution?.text).toBe('transcript at mtime 1000')
+    expect(result1.diagnostics.cacheStatus).toBe('hit')
 
-     // Second read with mtime 2000 (file was modified)
-     const result2 = await readTranscriptCache({
-       url,
-       cacheMode: 'default',
-       transcriptCache,
-       fileMtime: 2000,
-     })
+    // Second read with mtime 2000 (file was modified)
+    const result2 = await readTranscriptCache({
+      url,
+      cacheMode: 'default',
+      transcriptCache,
+      fileMtime: 2000,
+    })
 
-     expect(result2.resolution).toBeNull()
-     expect(result2.diagnostics.cacheStatus).toBe('miss')
+    expect(result2.resolution).toBeNull()
+    expect(result2.diagnostics.cacheStatus).toBe('miss')
 
-     // Verify that get was called with different mtimes, proving the system
-     // properly threads mtime through for cache-aware implementations
-     expect(getCallLog).toEqual([
-       { url, fileMtime: 1000 },
-       { url, fileMtime: 2000 },
-     ])
-   })
+    // Verify that get was called with different mtimes, proving the system
+    // properly threads mtime through for cache-aware implementations
+    expect(getCallLog).toEqual([
+      { url, fileMtime: 1000 },
+      { url, fileMtime: 2000 },
+    ])
+  })
 })

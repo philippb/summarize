@@ -37,11 +37,19 @@ function toBinaryString(bytes: Uint8Array) {
 function toBase64(input: unknown): { base64: string; size: number; mimeType: string } {
   if (input instanceof ArrayBuffer) {
     const bytes = new Uint8Array(input)
-    return { base64: btoa(toBinaryString(bytes)), size: bytes.length, mimeType: 'application/octet-stream' }
+    return {
+      base64: btoa(toBinaryString(bytes)),
+      size: bytes.length,
+      mimeType: 'application/octet-stream',
+    }
   }
   if (ArrayBuffer.isView(input)) {
     const bytes = new Uint8Array(input.buffer)
-    return { base64: btoa(toBinaryString(bytes)), size: bytes.length, mimeType: 'application/octet-stream' }
+    return {
+      base64: btoa(toBinaryString(bytes)),
+      size: bytes.length,
+      mimeType: 'application/octet-stream',
+    }
   }
   if (typeof input === 'string') {
     const bytes = new TextEncoder().encode(input)

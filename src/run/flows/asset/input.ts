@@ -12,10 +12,11 @@ import { assertAssetMediaTypeSupported } from '../../attachments.js'
 import type { SummarizeAssetArgs } from './summary.js'
 
 /**
- * Check if a media type is audio
+ * Check if a media type should route through transcription.
  */
-function isAudioMediaType(mediaType: string): boolean {
-  return mediaType.toLowerCase().startsWith('audio/')
+function isTranscribableMediaType(mediaType: string): boolean {
+  const normalized = mediaType.toLowerCase()
+  return normalized.startsWith('audio/') || normalized.startsWith('video/')
 }
 
 export type AssetInputContext = {
@@ -73,15 +74,15 @@ export async function handleFileInput(
     const loaded = await loadLocalAsset({ filePath: inputTarget.filePath })
     assertAssetMediaTypeSupported({ attachment: loaded.attachment, sizeLabel })
 
-    // Check if this is an audio file
-    const isAudio = isAudioMediaType(loaded.attachment.mediaType)
-    const handler = isAudio && ctx.summarizeMediaFile ? ctx.summarizeMediaFile : ctx.summarizeAsset
+    const isTranscribable = isTranscribableMediaType(loaded.attachment.mediaType)
+    const handler =
+      isTranscribable && ctx.summarizeMediaFile ? ctx.summarizeMediaFile : ctx.summarizeAsset
 
     if (ctx.progressEnabled) {
       const mt = loaded.attachment.mediaType
       const name = loaded.attachment.filename
       const details = sizeLabel ? `${mt}, ${sizeLabel}` : mt
-      const action = isAudio ? 'Transcribing' : 'Summarizing'
+      const action = isTranscribable ? 'Transcribing' : 'Summarizing'
       spinner.setText(name ? `${action} ${name} (${details})…` : `${action} ${details}…`)
     }
 

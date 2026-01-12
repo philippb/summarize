@@ -2,11 +2,6 @@ import type { AssistantMessage, Message } from '@mariozechner/pi-ai'
 import { shouldPreferUrlMode } from '@steipete/summarize-core/content/url'
 import { defineBackground } from 'wxt/utils/define-background'
 import { parseSseEvent } from '../../../../src/shared/sse-events.js'
-import { buildChatPageContent } from '../lib/chat-context'
-import { buildDaemonRequestBody, buildSummarizeRequestBody } from '../lib/daemon-payload'
-import { createDaemonRecovery, isDaemonUnreachableError } from '../lib/daemon-recovery'
-import { loadSettings, patchSettings } from '../lib/settings'
-import { parseSseStream } from '../lib/sse'
 import {
   deleteArtifact,
   getArtifactRecord,
@@ -14,6 +9,11 @@ import {
   parseArtifact,
   upsertArtifact,
 } from '../automation/artifacts-store'
+import { buildChatPageContent } from '../lib/chat-context'
+import { buildDaemonRequestBody, buildSummarizeRequestBody } from '../lib/daemon-payload'
+import { createDaemonRecovery, isDaemonUnreachableError } from '../lib/daemon-recovery'
+import { loadSettings, patchSettings } from '../lib/settings'
+import { parseSseStream } from '../lib/sse'
 
 type PanelToBg =
   | { type: 'panel:ready' }
@@ -1380,7 +1380,11 @@ export default defineBackground(() => {
   })
 
   chrome.runtime.onMessage.addListener(
-    (raw: HoverToBg | NativeInputRequest | ArtifactsRequest, sender, sendResponse): boolean | undefined => {
+    (
+      raw: HoverToBg | NativeInputRequest | ArtifactsRequest,
+      sender,
+      sendResponse
+    ): boolean | undefined => {
       if (!raw || typeof raw !== 'object' || typeof (raw as { type?: unknown }).type !== 'string') {
         return
       }

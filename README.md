@@ -99,6 +99,7 @@ URLs or local paths:
 summarize "/path/to/file.pdf" --model google/gemini-3-flash-preview
 summarize "https://example.com/report.pdf" --model google/gemini-3-flash-preview
 summarize "/path/to/audio.mp3"
+summarize "/path/to/video.mp4"
 ```
 
 YouTube (supports `youtube.com` and `youtu.be`):
@@ -156,7 +157,7 @@ Best effort and provider-dependent. These usually work well:
   - Text-like files are inlined into the prompt for better provider compatibility.
 - PDFs: `application/pdf` (provider support varies; Google is the most reliable here)
 - Images: `image/jpeg`, `image/png`, `image/webp`, `image/gif`
-- Audio/Video: `audio/*`, `video/*` (local audio files MP3/WAV/M4A/OGG/FLAC automatically transcribed, when supported by the model)
+- Audio/Video: `audio/*`, `video/*` (local audio/video files MP3/WAV/M4A/OGG/FLAC/MP4/MOV/WEBM automatically transcribed, when supported by the model)
 
 Notes:
 
@@ -282,8 +283,8 @@ summarize "https://www.youtube.com/watch?v=..." --extract --format md --markdown
 
 ### Media transcription (Whisper)
 
-`--video-mode transcript` forces audio/video inputs (local files or direct media URLs) through Whisper first,
-then summarizes the transcript text. Prefers local `whisper.cpp` when available; otherwise requires
+Local audio/video files are transcribed first, then summarized. `--video-mode transcript` forces
+direct media URLs (and embedded media) through Whisper first. Prefers local `whisper.cpp` when available; otherwise requires
 `OPENAI_API_KEY` or `FAL_KEY`.
 
 ### Verified podcast services (2025-12-25)
@@ -314,11 +315,10 @@ When the input is audio/video, the CLI needs a transcript first. The transcript 
    - Prefers local `whisper.cpp` when installed + model available.
    - Otherwise uses cloud Whisper (OpenAI `OPENAI_API_KEY`) or FAL (`FAL_KEY`).
 
-For "any video/audio file" (local path or direct media URL), use `--video-mode transcript` to force
-transcribe -> summarize:
+For direct media URLs, use `--video-mode transcript` to force transcribe -> summarize:
 
 ```bash
-summarize /path/to/file.mp4 --video-mode transcript --lang en
+summarize https://example.com/file.mp4 --video-mode transcript --lang en
 ```
 
 ### Configuration

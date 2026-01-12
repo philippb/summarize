@@ -24,7 +24,7 @@ Lightweight, CLI-only SQLite cache. Single DB file.
 ## What we cache
 
 - **Transcripts**
-  - key: `sha256({url, namespace, formatVersion})`
+  - key: `sha256({url, namespace, fileMtime?, formatVersion})` (local file paths include `fileMtime` for invalidation)
 - **Extracted content** (URL → text/markdown)
   - key: `sha256({url, extractSettings, formatVersion})`
 - **Summaries**

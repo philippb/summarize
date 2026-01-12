@@ -4,8 +4,7 @@
  * when transcribing local audio files.
  */
 
-import { writeFileSync, statSync } from 'node:fs'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -227,17 +226,14 @@ describe('transcript cache integration with audio files', () => {
 
     const mtime = statSync(audioPath).mtimeMs
 
-    const getArgs: unknown[] = []
-    const setArgs: unknown[] = []
+    const getArgs: Array<{ fileMtime?: number | null }> = []
 
     const transcriptCache: TranscriptCache = {
       get: vi.fn(async (args) => {
         getArgs.push(args)
         return null
       }),
-      set: vi.fn(async (args) => {
-        setArgs.push(args)
-      }),
+      set: vi.fn(async () => {}),
     }
 
     // Perform read that would trigger a write
@@ -250,7 +246,7 @@ describe('transcript cache integration with audio files', () => {
 
     // Verify get was called with fileMtime
     expect(getArgs).toHaveLength(1)
-    expect((getArgs[0] as any)?.fileMtime).toBe(mtime)
+    expect(getArgs[0]?.fileMtime).toBe(mtime)
   })
 
   it('uses file:// URL format for file paths in cache keys', async () => {
@@ -285,7 +281,7 @@ describe('transcript cache integration with audio files', () => {
 
   it('supports optional fileMtime parameter for backward compatibility', async () => {
     const transcriptCache: TranscriptCache = {
-      get: vi.fn(async (args) => {
+      get: vi.fn(async (_args) => {
         // Should work even without fileMtime
         return {
           content: 'Works without fileMtime',

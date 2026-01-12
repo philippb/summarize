@@ -1,5 +1,5 @@
 /**
- * Media file transcription handler for local audio files.
+ * Media file transcription handler for local audio/video files.
  * Phase 2: Transcript provider integration
  * Phase 2.2: Local file path handling for transcript caching
  */
@@ -9,10 +9,10 @@ import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createLinkPreviewClient, type ExtractedLinkContent } from '../../../content/index.js'
 import { createFirecrawlScraper } from '../../../firecrawl.js'
+import type { AssetAttachment } from '../../attachments.js'
+import { readTweetWithBird } from '../../bird.js'
 import { resolveTwitterCookies } from '../../cookies/twitter.js'
 import { hasBirdCli } from '../../env.js'
-import { readTweetWithBird } from '../../bird.js'
-import type { AssetAttachment } from '../../attachments.js'
 import { writeVerbose } from '../../logging.js'
 import type { AssetSummaryContext, SummarizeAssetArgs } from './summary.js'
 
@@ -35,7 +35,7 @@ function getFileModificationTime(filePath: string): number | null {
 }
 
 /**
- * Handler for local audio files.
+ * Handler for local audio/video files.
  *
  * Phase 2 Implementation:
  * 1. Validates transcription provider availability
@@ -61,7 +61,7 @@ export async function summarizeMediaFile(
   const hasAnyTranscriptionProvider = openaiKey || falKey || hasLocalWhisper
 
   if (!hasAnyTranscriptionProvider) {
-    throw new Error(`Audio file transcription requires one of the following:
+    throw new Error(`Media file transcription requires one of the following:
 
 1. OpenAI Whisper:
    Set OPENAI_API_KEY=sk-...
@@ -88,20 +88,29 @@ See: https://github.com/openai/whisper for setup details`)
     const maxSizeBytes = 500 * 1024 * 1024 // 500 MB
 
     if (fileSizeBytes === 0) {
-      throw new Error('Audio file is empty (0 bytes). Please provide a valid audio file.')
+      throw new Error('Media file is empty (0 bytes). Please provide a valid audio/video file.')
     }
 
     if (fileSizeBytes > maxSizeBytes) {
       const fileSizeMB = Math.round(fileSizeBytes / (1024 * 1024))
-      throw new Error(`Audio file is too large (${fileSizeMB} MB). Maximum supported size is 500 MB.`)
+      throw new Error(
+        `Media file is too large (${fileSizeMB} MB). Maximum supported size is 500 MB.`
+      )
     }
-   } catch (error) {
-     if (error instanceof Error && (error.message.includes('empty') || error.message.includes('large'))) {
-       throw error // Re-throw our validation errors
-     }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('empty') || error.message.includes('large'))
+    ) {
+      throw error // Re-throw our validation errors
+    }
     // For other statSync errors (e.g., file not found), let them bubble up
-    throw new Error(`Unable to access audio file: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    throw new Error(
+      `Unable to access media file: ${error instanceof Error ? error.message : 'Unknown error'}`
+    )
   }
+
+  const cacheMode = ctx.cache.mode
 
   // Create Firecrawl scraper if configured
   const firecrawlScraper =
@@ -112,20 +121,23 @@ See: https://github.com/openai/whisper for setup details`)
         })
       : null
 
-  // Create reader for bird tweets (for completeness, not used for audio)
+  // Create reader for bird tweets (for completeness, not used for media)
   const readTweetWithBirdClient = hasBirdCli(ctx.env)
     ? ({ url, timeoutMs }: { url: string; timeoutMs: number }) =>
         readTweetWithBird({ url, timeoutMs, env: ctx.env })
     : null
 
   // Create link preview client for transcript resolution
+  const transcriptCache =
+    cacheMode === 'default' ? (ctx.cache.store?.transcriptCache ?? null) : null
+
   const client = createLinkPreviewClient({
     apifyApiToken: ctx.apiStatus.apifyToken,
     ytDlpPath: ytDlpPath,
     falApiKey: falKey,
     openaiApiKey: openaiKey,
     scrapeWithFirecrawl: firecrawlScraper,
-    convertHtmlToMarkdown: null, // Not needed for audio
+    convertHtmlToMarkdown: null, // Not needed for media
     readTweetWithBird: readTweetWithBirdClient,
     resolveTwitterCookies: async (_args) => {
       const res = await resolveTwitterCookies({ env: ctx.env })
@@ -136,8 +148,7 @@ See: https://github.com/openai/whisper for setup details`)
       }
     },
     fetch: ctx.trackedFetch,
-    transcriptCache:
-      ctx.cache.mode === 'default' ? (ctx.cache.store?.transcriptCache ?? null) : null,
+    transcriptCache,
     onProgress: (_event) => {
       // Could update progress here if needed
       // For now, silent transcription
@@ -153,24 +164,25 @@ See: https://github.com/openai/whisper for setup details`)
     // Fetch the link content (will trigger transcription for media)
     // Using file:// URL ensures the provider chain can handle local files properly
     const extracted: ExtractedLinkContent = await client.fetchLinkContent(fileUrl, {
-      cacheMode: 'default',
+      timeoutMs: ctx.timeoutMs,
+      cacheMode,
       youtubeTranscript: 'auto', // Not used for local files, but set for completeness
-      mediaTranscript: 'prefer', // Prefer transcription for audio files
+      mediaTranscript: 'prefer', // Prefer transcription for media files
       transcriptTimestamps: false,
       fileMtime, // Include file modification time for cache invalidation
     })
 
     // Check if we got a transcript
     if (!extracted.content || extracted.content.trim().length === 0) {
-      throw new Error(`Failed to transcribe audio file. Check that:
-  - Audio format is supported (MP3, WAV, M4A, OGG, FLAC)
+      throw new Error(`Failed to transcribe media file. Check that:
+  - Audio/video format is supported (MP3, WAV, M4A, OGG, FLAC, MP4, MOV, WEBM)
   - Transcription provider is configured
   - File is readable
-  - Audio is not corrupted`)
+  - Media file is not corrupted`)
     }
 
     // Create a text-based attachment from the transcript
-    const filename = args.sourceLabel.split('/').pop() ?? 'audio'
+    const filename = args.sourceLabel.split('/').pop() ?? 'media'
     const transcriptAttachment: AssetAttachment = {
       mediaType: 'text/plain',
       filename: `${filename}.transcript.txt`,
@@ -178,12 +190,12 @@ See: https://github.com/openai/whisper for setup details`)
       bytes: new TextEncoder().encode(extracted.content),
     }
 
-     writeVerbose(
-       ctx.stderr,
-       ctx.verbose,
-       `transcription done audio file: ${extracted.diagnostics?.transcript?.provider ?? 'unknown'}`,
-       false
-     )
+    writeVerbose(
+      ctx.stderr,
+      ctx.verbose,
+      `transcription done media file: ${extracted.diagnostics?.transcript?.provider ?? 'unknown'}`,
+      false
+    )
 
     // Call the standard asset summarization with the transcript
     const { summarizeAsset } = await import('./summary.js')

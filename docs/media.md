@@ -20,6 +20,7 @@ read_when:
 
 - `--video-mode transcript` prefers transcript-first media handling even when a page has text.
 - Direct media URLs (mp4/webm/m4a/etc) skip HTML and transcribe.
+- Local audio/video files are routed through the same transcript-first pipeline.
 - YouTube still uses the YouTube transcript pipeline (captions → yt-dlp fallback).
 
 ## Chrome extension behavior
